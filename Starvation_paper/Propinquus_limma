@@ -1,0 +1,1190 @@
+setwd("F:/Antarctic_copepods/Propinquus/salmon/")
+
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(viridis)
+library(tximport)
+library(readr)
+library(edgeR)
+library(limma)
+
+counts_dir = "F:/Antarctic_copepods/Propinquus/salmon/counts/"
+count_files <- file.path(counts_dir, list.files(counts_dir))
+names(count_files) <- basename(gsub(count_files, pattern = "_quant.sf", replacement = ''))
+
+tx2gene = readr::read_tsv("F:/Antarctic_copepods/Propinquus/prop_clusters.txt")
+
+##limma
+
+txi <- tximport(count_files, type="salmon", tx2gene = tx2gene, countsFromAbundance = "lengthScaledTPM")
+
+y <- DGEList(txi$counts)
+
+# filtering
+
+keep <- rowSums( y$counts >= 15 ) >= 4
+summary(keep)
+
+y = y[keep,, keep.lib.sizes=FALSE]
+
+y <- calcNormFactors(y)
+plotMDS(y) #pretty big outlier
+
+cpms = cpm(y, log=TRUE)
+#write.table(cpms, "limma_CPM_withOutlier.txt", quote = FALSE, sep = "\t")
+
+##PCA 
+treatments <- read.table("F:/Antarctic_copepods/Propinquus/salmon/sample_table.txt", header=TRUE)
+treatments$site = factor(treatments$site)
+treatments$day = factor(treatments$day)
+treatments$Group = paste(treatments$group, treatments$food, treatments$site, treatments$day, sep="_")
+treatments$Group = sub("_NA", "", treatments$Group)
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Propinquus/Figs/PCA_cpm_080123.png")
+pca <- prcomp(t(cpms))
+df <- cbind(group=treatments$Group, data.frame(pca$x))
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
+  ggtitle("Prop PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
+  ylab(paste0("PC2 (", signif(PC2_var, 2), ")")) 
+dev.off()
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Propinquus/Figs/PCA_Ship_080123.png")
+pca <- prcomp(t(cpms[,c(1:4, 17:32)]))
+df <- cbind(group=treatments$Group[c(1:4, 17:32)], data.frame(pca$x))
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
+  ggtitle("Prop PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
+  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
+dev.off()
+
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Propinquus/Figs/PCA_JustExp_080123.png")
+pca <- prcomp(t(cpms[,c(17:32)]))
+df <- cbind(group=treatments$Group[c(17:32)], data.frame(pca$x))
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
+  ggtitle("Prop PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
+  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
+dev.off()
+
+treatments = treatments[-24,]
+
+count_files = count_files[-24]
+
+txi <- tximport(count_files, type="salmon", tx2gene = tx2gene, countsFromAbundance = "lengthScaledTPM")
+rownames(group_table) <- colnames(txi$counts)
+TPM10k <- (txi$abundance * nrow(txi$abundance) )/ 10**4
+#write.csv(file="Prop_TPM10k.txt")
+
+y <- DGEList(txi$counts)
+keep <- rowSums( y$counts >= 15 ) >= 4
+#now keep 76,556
+
+y = y[keep,, keep.lib.sizes=FALSE]
+
+y <- calcNormFactors(y)
+cpms = cpm(y, log=TRUE)
+write.table(cpms, "limma_CPM.txt", quote = FALSE, sep = "\t")
+cpms <- read.table("limma_CPM.txt")
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Propinquus/Figs/PCA_noOut_cpm_080123.png")
+pca <- prcomp(t(cpms))
+df <- cbind(group=treatments$Group, data.frame(pca$x))
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
+  ggtitle("Propinquus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
+  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
+dev.off()
+
+
+tmp <- paletteer_d("MetBrewer::Hiroshige")
+field_cols <- c("#4477AA", "#228833", "#EE6677", '#5d5d5d')
+field_labs <- paste0("Field, ", c("000.100", "200.000", "100.180", "-100.100"))
+field_breaks <- c("S1", "S2", "S3", "S4")
+starve_cols <- c("#E76254FF", "#EF8A47FF", "#72BCD5FF", "#376795FF")
+starve_breaks <- c("S9", "S5", "F5", "F9")
+starve_labs <- c("Starved D9", "Starved D5", "Fed D5", "Fed D9")
+
+group_table <- data.frame(group = c(rep(c("S1", "S2", "S3", "S4"), each=4), 
+                                       rep("F5", 4), rep("S5", 3), rep(c("F9", "S9"), each=4)))
+#to match Ann's figure: 
+png(res=600, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Prop_PCA_full_080123.png")
+pca <- prcomp(t(cpms))
+df <- cbind(group_table, pca$x)
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+p <- ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group, shape=group), size=3)+ 
+  ggtitle("Prop PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var*100, 3), "%)")) + 
+  ylab(paste0("PC2 (", signif(PC2_var*100, 3), "%)")) + theme_classic()  + theme(text = element_text(size = 20), plot.title = element_blank())
+
+p + scale_color_manual(name = "Group",
+                       values = c(field_cols, starve_cols), 
+                       breaks = c(field_breaks, starve_breaks),
+                       labels = c(field_labs, starve_labs)) + 
+  scale_shape_manual(name = "Group", labels = c(field_labs, starve_labs),
+                     breaks = c(field_breaks, starve_breaks), 
+                     values = c(rep(3, 4), rep(16, 4))) 
+dev.off()
+
+#Lump all Field together: 
+png(res=600, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Prop_PCA_1field_080123.png")
+pca <- prcomp(t(cpms))
+df <- cbind(group_table, pca$x)
+df[c(1:16),]$group <- "Field"
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+p <- ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group, shape=group), size=3)+ 
+  ggtitle("Prop PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var*100, 3), "%)")) + 
+  ylab(paste0("PC2 (", signif(PC2_var*100, 3), "%)")) + theme_classic()
+
+p + scale_color_manual(name = "Group",
+                       values = c("black", starve_cols), 
+                       breaks = c("Field", starve_breaks),
+                       labels = c("Field", starve_labs)) + 
+  scale_shape_manual(name = "Group", labels = c("Field", starve_labs),
+                     breaks = c("Field", starve_breaks), 
+                     values = c(3, rep(16, 4))) 
+dev.off()
+
+#And just the Expt
+png(res=600, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Prop_PCA_Expt.png")
+pca <- prcomp(t(cpms)[-c(1:16),])
+df <- cbind(group_table[-c(1:16),,drop=F], pca$x)
+PC1_var <- summary(pca)$importance[2]
+PC2_var <- summary(pca)$importance[5]
+p <- ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
+  ggtitle("Prop PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var*100, 3), "%)")) + 
+  ylab(paste0("PC2 (", signif(PC2_var*100, 3), "%)")) + theme_classic()
+
+p + scale_color_manual(name = "Group",
+                       values = starve_cols, 
+                       breaks = starve_breaks,
+                       labels = starve_labs) +
+  scale_y_reverse() + scale_x_reverse()  + theme(text = element_text(size = 20), plot.title = element_blank())
+dev.off()
+
+
+
+
+#design
+treatments <- read.table("F:/Antarctic_copepods/Propinquus/salmon/sample_table.txt", header=TRUE)
+treatments$site = factor(treatments$site)
+treatments$day = factor(treatments$day)
+
+#experiment site is S4!
+#drop the row for the outlier
+treatments = treatments[-24,,drop=FALSE]
+
+treatments$site <- relevel(treatments$site, ref="S1")
+
+
+options(na.action = 'na.pass');
+mm = model.matrix( ~0+ group + food*day + site, data = treatments)
+mm[is.na(mm)] <- 0
+
+design <- mm[,colSums(mm) != 0]
+
+##create contrast matrix
+colnames(design) <- gsub("group", "", colnames(design))
+colnames(design) <- gsub("food", "", colnames(design))
+colnames(design) <- gsub(":", "_", colnames(design))
+
+# We use dummy coding to create the design matrix, and then have to use some algebra to get the contrasts of interest.
+# The interpretation of the coefficients in the design column is: lab is the mean at F4. Field is the mean at S1 (reference levels).
+# Starved coefficient is the difference between starve and fed ON DAY 4 (so "early"). Starve_day9 is the additional effect of day9 on the starve effect
+# To get the overall starve effect, we have to average these. A similar logic gives the average of Fed4 + Fed9, and then we add half of "starved_total" to that to end up with the average of all the lab/ship samples.
+
+##Do I double fed_v_S1?
+cmat <- makeContrasts(
+  siteS1 - siteS2,
+  siteS1 - siteS4,
+  siteS2 - siteS4,
+  levels = colnames(design))
+
+cmat <- makeContrasts(
+  S1 = (siteS1 - (siteS2 + siteS3 + siteS4)/3),
+  S2 = (siteS2 - (siteS1 + siteS3 + siteS4)/3),
+  S3 = (siteS3 - (siteS2 + siteS1 + siteS4)/3),
+  S4 = (siteS4 - (siteS2 + siteS3 + siteS1)/3),
+  levels = colnames(design))
+
+cmat <- makeContrasts(
+  lab_v_S1 = (2*lab + day9)/2 + (2*starved + starved_day9)/4 - field,
+  fed_v_S1 = (2*lab + day9)/2 - field,
+  starved_total = (2*starved + starved_day9)/2, 
+  starved_late = starved + starved_day9,
+  starved_early = starved,
+  starve_day_int = starved_day9,
+  levels = colnames(design))
+
+
+vq <- voomWithQualityWeights(y, design, plot=TRUE)
+
+vfit <- lmFit(vq, design)
+vfit <- contrasts.fit(vfit, contrasts=cmat)
+
+efit <- eBayes(vfit, robust=TRUE)
+plotSA(efit, main="Final model: Mean-variance trend")
+
+summary(decideTests(efit))
+
+plot(y=sqrt(efit$sigma), x=efit$Amean)
+plot(y=sqrt(efit$s2.post), x=efit$Amean)
+plot(y=sqrt(efit$stdev.unscaled[,3]), x=efit$Amean)
+plot(y=sqrt(efit$stdev.unscaled[,3]), x=sqrt(efit$stdev.unscaled*sqrt(efit$s2.post))[,3] )
+
+res=topTable(efit, n=Inf, coef=4)
+
+plot_site_fun <- function(gene){
+  gene_counts <- cpms[gene,1:16]
+  to_plot <- cbind(treatments_field, t(gene_counts))
+  names(to_plot)[3] <- "CPM"
+  
+  ggplot(to_plot, aes(x=site, y=CPM, color=site)) + geom_point(size=2) + theme_bw()
+  to_plot %>% group_by(site) %>% summarize(mean(CPM))
+}
+
+3.2256 - (4.0719+5.1034+4.5212)/3
+
+#Will want the standard errors, SD, and degrees of freedom for comparative analyses
+write.csv(efit$stdev.unscaled*sqrt(efit$s2.post), file="F:/Antarctic_copepods/starve/propinquus/SE_prop_080123.csv")
+write.csv(cbind(rownames(efit$coefficients), sqrt(efit$s2.post)), file="F:/Antarctic_copepods/starve/propinquus/SD_prop_080123.csv")
+write.csv(cbind(rownames(efit$coefficients), efit$df.total), file="F:/Antarctic_copepods/starve/propinquus/df_prop_080123.csv")
+
+
+lapply(seq(1,6), function(i){
+  write.csv(topTable(efit, coef=i, confint=TRUE, number = Inf), file=paste0(colnames(efit)[i], "_efit_080123.csv"))
+})
+
+
+
+##WGCNA
+library(WGCNA)
+library(psych)
+disableWGCNAThreads()
+
+
+#filter low-expression
+counts = read.table("limma_CPM.txt", check.names = FALSE)
+
+##WGCNA wants genes as columns
+dat_expr <- t(counts)
+
+#checks for missing entries and zero-variance genes
+gsg = goodSamplesGenes(dat_expr, verbose = 3);
+gsg$allOK
+
+##Cluster samples to look for outliers
+sample_tree = hclust(dist(dat_expr), method = "average");
+plot(sample_tree, main = "Sample clustering to detect outliers", sub="", xlab='')
+
+## Choose soft thresholding exponent (for calculating adjacency)
+
+powers = c(c(1:10), seq(from=12, to = 20, by=2))
+
+sft <- pickSoftThreshold(dat_expr, powerVector=powers, verbose=5)
+
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n", main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], labels=powers, col="red");
+
+abline(h=0.85,col="red")
+
+soft_power = 7
+
+options(stringsAsFactors = FALSE);
+lnames = load(file = "F:/Antarctic_copepods/Propinquus/prop_signed_bicor.RData");
+
+## want to identify modules associated with treatment effects
+n_genes = ncol(dat_expr)
+n_samples = nrow(dat_expr)
+
+MEs0 = moduleEigengenes(dat_expr, module_colors)$eigengenes
+MEs = orderMEs(MEs0)
+
+treatments <- read.table("F:/Antarctic_copepods/Propinquus/WGCNA/CTD_table.txt", header = TRUE)
+treatments$group = factor(treatments$group)
+treatments$food = factor(treatments$food)
+treatments$site = factor(treatments$site)
+treatments$day = factor(treatments$day)
+
+treatments$site = relevel(treatments$site, ref="S4")
+
+
+options(na.action = 'na.pass');
+mm = model.matrix( ~ group + food*day + site, data = treatments)
+mm[is.na(mm)] <- 0
+
+
+##categorical data
+model.lm <- lapply(MEs, function(x){
+  lm(x ~ mm, drop.unused.levels = TRUE)
+})
+
+##the problem here is that we want to make specific comparisons that are not in this table of contrasts. as it is now, 
+##each factor has a reference level. Meaning, "Lab" is actually the difference betweeen lab samples and Site27, where we really want to average
+##over all field sites. Similarly, "refed" and "starved" both compare versus "fed" ON DAY 4. We can do this with a generalied linear hypothesis test,
+#using a vector of column coefficients. Let's consult cmat from the DE analysis, which basically already did this.
+
+##we need to remove the NA model coefficients. These are the intercept, so
+
+attr.assign = attr(mm, "assign")
+attr.contrasts = attr(mm, "contrasts")
+##these are the NA column numbers
+rmvCols = c(1)
+M = mm[,-rmvCols] # Remove intercept column (required) and and other NA columns
+# Reassign the "assign" attribute, removing the corresponding elements from it.
+attr(M, "assign") = attr.assign[-rmvCols]
+# Reassign the "contrasts" attribute to its original value
+attr(M, "contrasts") = attr.contrasts
+
+model.lm <- lapply(model.lm, function(x){
+  update(x, ~M)
+})
+
+design <- mm[,colSums(mm) != 0]
+
+##create contrast matrix
+colnames(design) <- gsub("group", "", colnames(design))
+colnames(design) <- gsub("food", "", colnames(design))
+colnames(design) <- gsub(":", "_", colnames(design))
+
+
+##build up my contrasts manuallly...
+cmat <- makeContrasts(
+  lab_v_S4 = (2*lab + day9)/2 + (2*starved + starved_day9)/4,
+  fed_v_S4 = (2*lab + day9)/2,
+  starved_total = (2*starved + starved_day9)/2, 
+  starved_early = starved,
+  starved_late = starved + starved_day9,
+  starve_day_int = starved_day9,
+  #site_S2 = siteS2,
+  #site_S3 = siteS3,
+  #site_S4 = siteS4,
+  levels = colnames(design))
+
+cmat = cmat[-11,]
+
+my_contrast_fun <- function(x){
+  
+
+  
+  tests = sapply(1:ncol(cmat), function(i){
+    t <- glht(x, linfct = t(cmat[,i]))
+    
+    return(summary(t)$test)
+  })
+  
+  colnames(tests) = c("Ship", "Fed_v_S4", "Starve", "Early", "Late", "Int")
+  
+  coef = as.data.frame(t(tests)[,c(3,6)])
+  coef$padj = p.adjust(coef$pvalues, method="BH")
+  
+  return(coef)
+}
+
+library(multcomp)
+
+test = glht(model.lm[[1]], linfct = t(as.matrix(cmat[,2])))
+
+model_contrasts = lapply(model.lm, my_contrast_fun)
+
+##heatmap of fitted values ("means"), and below each row the Pearson coefficient
+
+mat <- lapply(model_contrasts, function(x){
+  text_vect <- x$coefficients
+  return(as.numeric(text_vect))
+})
+
+mat <- do.call(rbind, mat)
+colnames(mat) = c("Ship",  "Fed_v_S4", "Starve", "Early", "Late", "Int")
+
+
+p_values = lapply(model_contrasts, function(x){
+  return(x$pvalues)
+})
+p_values <- do.call(rbind, p_values)
+
+##remove grey module (which is not a real module) and correct for multiple testing within each variable (model term)
+p_values = p_values[-nrow(p_values),]
+p_adj <- apply(p_values, 2, p.adjust, method = "BH")
+
+mat = mat[-nrow(mat), ]
+
+text_mat = matrix(paste(signif(as.numeric(mat), 2), ", p=", signif(p_adj, 2), sep = ""), nrow=nrow(mat), ncol=ncol(mat), dimnames=dimnames(mat))
+
+text_mat[which(p_adj < 0.05)] = paste(text_mat[which(p_adj < 0.05)], "*")
+text_mat[which(p_adj < 0.01)] = paste(text_mat[which(p_adj < 0.01)], "*", sep='')
+text_mat[which(p_adj < 0.001)] = paste(text_mat[which(p_adj < 0.001)], "*", sep='')
+
+mod_names <- substring(rownames(text_mat), 3)
+
+sizeGrWindow(20,12)
+
+png(units='in', width=20, height=12, res=600, file="Prop_WGCNA_080123.png")
+par(mai = c(0.5, 2, 0.5, 0.2));
+
+labeledHeatmap(Matrix = mat,
+               xLabels = colnames(text_mat),
+               yLabels = rownames(text_mat),
+               ySymbols = mod_names,
+               xLabelsAngle = 0,
+               colorLabels = TRUE,
+               setStdMargins = FALSE,
+               colors = blueWhiteRed(50),
+               textMatrix = text_mat,
+               cex.text = 1.25,
+               cex.lab.x = 1.75,
+               cex.lab.y = 1.25,
+               zlim = c(-0.5,0.5),
+               
+               main = "Module-treatment relationships"
+)
+dev.off()
+
+##plot for Supplement (relabel columns to match manuscript table)
+mat <- mat[,c(3,4,5,6,2)]
+text_mat <- text_mat[,c(3,4,5,6,2)]
+colnames(text_mat) <- c("Starved (overall)", "Starved (Day 5)", "Starved (Day 9)", "Starve:Day interaction", "Expt. vs. Field")
+
+sizeGrWindow(20,12)
+
+png(units='in', width=20, height=12, res=600, file="Prop_WGCNA_Supp.png")
+par(mai = c(0.5, 2, 0.5, 0.2));
+
+labeledHeatmap(Matrix = mat,
+               xLabels = colnames(text_mat),
+               yLabels = rownames(text_mat),
+               ySymbols = mod_names,
+               xLabelsAngle = 0,
+               xLabelsAdj = 0.5,
+               xColorOffset = 0.01,
+               colorLabels = TRUE,
+               setStdMargins = FALSE,
+               colors = blueWhiteRed(50),
+               textMatrix = text_mat,
+               cex.text = 1.25,
+               cex.lab.x = 1.75,
+               cex.lab.y = 1.25,
+               zlim = c(-0.5,0.5),
+               
+               main = "Module-treatment relationships"
+)
+dev.off()
+
+
+## module heatmaps
+
+
+##
+library(gplots)
+library(RColorBrewer)
+
+coolwarm_hcl <- colorspace::diverging_hcl(11,
+                                          h = c(250, 10), c = 100, l = c(20, 95), power = c(0.3, 1.7))
+sample_order = 
+  c("S1A", "S1B", "S1C", "S1D", "S2A", "S2B", "S2C", "S2D", 
+    "S3A", "S3B", "S3C", "S3D", "S4A", "S4B", "S4C", "S4D", 
+    "T1FA", "T1FB","T1FC", "T1FD", "T2FA","T2FB", "T2FC", "T2FD", "T1UA", "T1UB", "T1UC", "T2UA", "T2UB", "T2UC", "T2UD")
+
+#scale data
+z <- t(scale(t(counts)))
+
+module_plot_fun <- function(color){
+  
+  module_genes = module_colors==color
+  
+  png(res=600, units='in', height=4, width=8, file=paste0(color, "_Heatmap_wide.png") )
+  
+  par(oma=c(1,1,1,1))
+  heatmap.2(z[module_genes,sample_order], Colv = F, Rowv = T, 
+            labRow=F , trace="none", dendrogram = "row", key=F, keysize=1, density.info="none", 
+            scale="row", col=coolwarm_hcl, margins=c(1,1))
+  
+  dev.off()
+  
+}
+
+lapply(unique(module_colors)[-2][1:3], module_plot_fun)
+
+for (file in unique(module_colors)[-2]){
+  module_plot_fun(file)
+}
+
+
+################## CTD #####################
+#############################################
+
+
+rownames(treatments) = rownames(MEs)
+
+dat_traits = treatments[,5:11]
+dt = treatments[,-3]
+dt$group = c( rep(0, 16), rep(1, 15) )
+dt$food = c( rep(NA, 16), rep(0,4), rep(1,3), rep(0,4), rep(1,4) )
+
+cor_trait = cor(MEs, dat_traits, use = "p")
+cor_dt = cor(MEs, dt, use = "p")
+
+pvalue_trait = corPvalueStudent(cor_trait, n_samples);
+pvalue_dt = corPvalueStudent(cor_dt, n_samples);
+
+
+##############################################
+
+
+gene_mod_membership = as.data.frame(cor(dat_expr, MEs))
+
+names(gene_mod_membership) = paste("MM", mod_names, sep='_')
+
+gene_lm <- lapply(as.data.frame(dat_expr), function(x){
+  lm(x ~ mm)
+})
+
+## This creates a matrix of each gene's raw fold change over the intercept (expected mean value in the field).????
+gene_mat <- lapply(gene_lm, function(x){
+  text_vect <- x$coefficients
+  text_vect <-  abs((text_vect[c(3:11, 13)] + text_vect[1]) / text_vect[1])
+  return(text_vect)
+})
+
+gene_mat <- lapply(gene_lm, function(x){
+  text_vect <- x$coefficients
+  text_vect <-  text_vect[c(3:11, 13)]
+  return(text_vect)
+})
+
+gene_mat <- do.call(rbind, gene_mat)
+
+##
+
+n_genes = ncol(dat_expr)
+n_samples = nrow(dat_expr)
+MEs0 = moduleEigengenes(dat_expr, module_colors)$eigengenes
+MEs = orderMEs(MEs0)
+mod_names <- substring(names(MEs), 3)
+gene_mod_membership = as.data.frame(cor(dat_expr, MEs))
+
+module = "red" 
+column = match(module, mod_names)
+module_genes = module_colors==module
+sizeGrWindow(7, 7);
+par(mfrow = c(1,1));
+
+colnames(gene_mat) <- substring(colnames(gene_mat), 3)
+gene_mat <- as.data.frame(gene_mat)
+gene_mat$early = gene_mat$foodstarved
+gene_mat$late = gene_mat$foodstarved + gene_mat$`foodstarved:day9`
+gene_mat$starve = (gene_mat$early + gene_mat$late)/2
+
+
+mod_genes = rownames(gene_mat[module_colors==module,])
+
+lfc = de[de$X %in% mod_genes,]
+
+
+
+## These plots show "module membership" (similarity to the eigengene) on the x-axis and raw fold-change of the gene compared to control on the y-axis. Genes above the black line are upregulated, genes below are downregulated. 
+
+verboseScatterplot(gene_mod_membership[module_genes, column],
+                   gene_mat[module_genes, 13],
+                   xlab = paste("Module Membership in", module, "module"),
+                   ylab = colnames(gene_mat)[11],
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, cex.lab = 1.2, cex.axis = 1.2, col = module)
+
+abline(h=0,col="black")
+
+
+## Given a module (color), this function parses it into output for GO MWU (a list of all genes, with 0 for not in module and kME for within-module)
+
+
+print_for_mwu <- function(color){
+  module_genes = module_colors==color
+  
+  mod_genes <- as.data.frame(rownames(gene_mod_membership))
+  mod_genes[,2] = 0
+  mod_genes[module_genes,2] = gene_mod_membership[module_genes, match(color, mod_names)]
+  
+  write.csv(mod_genes, file=(paste(color, "_kMEs.csv", sep='')), row.names = FALSE, quote = FALSE)
+  
+}
+
+lapply(mod_names, print_for_mwu)
+
+print_for_GOSeq <- function(color){
+  module_genes = module_colors==color
+  
+  mod_genes <- as.data.frame(rownames(gene_mod_membership))
+  mod_genes[,2] = 0
+  mod_genes[module_genes,2] = 1
+  
+  write.csv(mod_genes, file=(paste(color, "_for_GOSeq.csv", sep='')), row.names = FALSE, quote = FALSE)
+  
+}
+
+lapply(mod_names, print_for_GOSeq)
+
+sig_starve = c("darkmagenta", "ivory", "darkorange", "purple", "royalblue", "paleturquoise", "turquoise", "magenta", "darkturquoise")
+
+sig_ship = c("blue", "darkmagenta", "purple", "lightcyan1", "mediumpurple3", "turquoise", "lightgreen")
+
+summary(factor(module_colors[module_colors %in% sig_starve]))
+summary(factor(module_colors[module_colors %in% sig_ship]))
+
+library(stringr)
+library(goseq)
+
+WGCNA_GOseq <- function(color){
+  module_genes = module_colors==color
+  
+  mod_genes <- as.data.frame(rownames(gene_mod_membership))
+  mod_genes[,2] = 0
+  mod_genes[module_genes,2] = 1
+  
+  all_genes = mod_genes[,1]
+  in_module = mod_genes[mod_genes[,2] == 1,][,1]
+  
+  mod_vector = as.integer(all_genes %in% in_module)
+  names(mod_vector) = all_genes
+    
+  lengths <- read.csv("Prop_lengths.csv")
+  lengths = as.vector(lengths[lengths$X %in% all_genes,2])
+    
+  GO = read.table("F:/Antarctic_copepods/Propinquus/go_annots.txt")
+    
+  GO_annots = str_split(GO$V2, pattern=";", n = Inf, simplify = FALSE)
+  names(GO_annots) = GO$V1
+    
+  #GO format needs to be a list of vectors: each entry is named with a gene and the vector is all GO terms associated with it
+    
+  
+  pwf <- nullp(mod_vector, bias.data=lengths)
+    
+  GO_mod = goseq(pwf, gene2cat=GO_annots)
+    
+  GO_mod$padj = p.adjust(GO_mod$over_represented_pvalue, method="BH")
+  sig_mod = GO_mod[GO_mod$padj < 0.05,][,c(1,8)]
+  write.table(sig_mod, file=paste0(color, "_GOseq.txt"), row.names = FALSE, quote=FALSE)
+    
+  print(paste(nrow(sig_mod), "GO terms in", color, "module") )
+}
+
+lapply(sig_ship, WGCNA_GOseq)
+lapply(sig_starve, WGCNA_GOseq)
+
+
+setwd("F:/Antarctic_copepods/Acutus/limma/")
+
+stress = read.csv("lab_v_field_efit.csv")
+early = read.csv("starved_early_efit.csv")
+late = read.csv("starved_late_efit.csv")
+starve = read.csv("starved_total_efit.csv")
+
+stress$measure = "stress"
+early$measure = "early"
+late$measure = "late"
+starve$measure = "starve"
+
+
+df = rbind(stress, early, late, starve)
+names(df)[1] = "Gene"
+
+df = df[order(df$Gene),]
+
+df$module = rep(module_colors, each = 4)
+df$up = df$adj.P.Val <= 0.05 & df$logFC > 0
+df$down = df$adj.P.Val <= 0.05 & df$logFC < 0
+
+no_grey = filter(df, module != "grey")
+
+no_grey$module = with(no_grey, reorder(module, as.numeric(up) + as.numeric(down), mean))
+
+
+p <- ggplot(no_grey, aes(x = module, fill = measure, y = as.numeric(up))) + stat_summary(fun = mean, geom = "bar", position = "dodge")
+p <- p + stat_summary(fun = mean, geom="bar", position = "dodge", aes(y = -as.numeric(down)))
+
+p + theme_bw()
+
+test = MEs
+
+test$sample = rownames(test)
+test$group = treatments$group
+test$food = treatments$food
+
+
+q <- ggplot(test, aes(y = MEred, x = sample, color = food)) + geom_point()
+q
+
+##Compare GO between modules
+red_genes = unique(df$Gene[df$module == "red"])
+magenta_genes = unique(df$Gene[df$module == "magenta"])
+
+red_GO = read.table("../GO/limma/red/parsed_wgcna.txt")
+magenta_GO = read.table("../GO/limma/magenta/parsed_wgcna.txt")
+
+red_GO = red_GO %>% filter(V1 != "term")
+magenta_GO = magenta_GO %>% filter(V1 != "term")
+
+in_both = red_GO[red_GO$V1 %in% magenta_GO$V1,]
+
+only_red = red_GO[!(red_GO$V1 %in% magenta_GO$V1),]
+only_magenta = magenta_GO[!(magenta_GO$V1 %in% red_GO$V1),]
+
+testfun <- function(genes){
+  tmp = df[df$Gene %in% genes,]
+  
+  p <- ggplot(tmp, aes(x = measure, color = Gene, y = logFC)) + geom_point(size=5) + theme_bw()
+  p <- p + geom_hline(yintercept = 0, color = "red")
+  p <- p + geom_errorbar(aes(ymax = CI.R, ymin = CI.L))
+  p
+}
+
+p <- ggplot(tmp, aes(x = measure, color = Gene, y = logFC, group = Gene)) + geom_line() + theme_bw()
+p <- p + geom_hline(yintercept = 0, color = "red")
+
+
+sigs = unique(df$Gene[which(df$adj.P.Val <=0.05)])
+
+df = df[df$Gene %in% sigs,]
+
+levels(df$measure) = c("early", "late", "all")
+
+
+##WGCNA Clusters
+D <- 1-(1+cor(MEs[,-25],use="p"))/2
+hcm = hclust(as.dist(D), method="average")
+plot(hcm)
+
+module_key = as.data.frame(cbind(rownames(gene_mod_membership), module_colors))
+names(module_key) = c("Gene", "cluster")
+
+wgcna <- merge(df, module_key, by="Gene")
+
+p <- ggplot(wgcna, aes(x=measure,y=logFC, group=cluster, colour=cluster)) + 
+  geom_line() +
+  xlab("Time") +
+  ylab("Expression") +
+  labs(title= "Cluster Expression by Time",color = "Cluster") + theme_bw()
+
+
+p + stat_summary(aes(group=cluster), fun=mean, geom="line", colour="green")
+
+
+
+df = data.frame(value = MEs$lightgreen, sample = rownames(MEs), group = treatments$group, food = treatments$food)
+
+p <- ggplot(df, aes(y = value, x = sample, color = food)) + geom_point()
+p
+
+##lemme try subsetting just the lab samples
+
+subs <- MEs[c(16:23, 39:50),]
+samples = treatments[c(16:23, 39:50),]
+
+options(na.action = 'na.pass');
+mm = model.matrix( ~food + day + food:day, data = samples)
+mm[is.na(mm)] <- 0
+
+##categorical data
+model.lm <- lapply(subs, function(x){
+  lm(x ~ mm)
+})
+
+mat <- lapply(model.lm, function(x){
+  text_vect <- x$coefficients
+  text_vect <- text_vect[c(3,4,5,7)] 
+  return(text_vect)
+})
+
+mat <- do.call(rbind, mat)
+
+p_values = lapply(model.lm, function(x){
+  p <- summary(x)$coefficients[,4]
+})
+p_values <- do.call(rbind, p_values)
+
+##remove grey module (which is not a real module) and correct for multiple testing for each variable (model term)
+p_values = p_values[-nrow(p_values), -1]
+p_adj <- apply(p_values, 2, p.adjust, method = "BH")
+
+mat = mat[-nrow(mat), ]
+
+text_mat = matrix(paste(signif(mat, 2), ", p=", signif(p_adj, 2), sep = ""), nrow=nrow(mat), ncol=ncol(mat), dimnames=dimnames(mat))
+
+text_mat[which(p_adj < 0.05)] = paste(text_mat[which(p_adj < 0.05)], "*")
+text_mat[which(p_adj < 0.01)] = paste(text_mat[which(p_adj < 0.01)], "*", sep='')
+text_mat[which(p_adj < 0.001)] = paste(text_mat[which(p_adj < 0.001)], "*", sep='')
+
+mod_names <- substring(rownames(text_mat), 3)
+
+sizeGrWindow(20,12)
+par(mai = c(0.5, 3, 0, 0));
+
+labeledHeatmap(Matrix = mat,
+               xLabels = substring(colnames(text_mat), 3),
+               yLabels = rownames(text_mat),
+               ySymbols = mod_names,
+               colorLabels = TRUE,
+               setStdMargins = FALSE,
+               colors = blueWhiteRed(50),
+               textMatrix = text_mat,
+               cex.text = 0.95,
+               zlim = c(-0.5,0.5),
+               main = "Module-treatment relationships"
+)
+dev.off()
+
+##df is all genes that are DE in at least one starved condition. What I want are the different possible patterns.
+
+##1. upregulated both early and late
+
+early_up <- filter(df, (measure=="early" & logFC > 0 & adj.P.Val <= 0.05))
+early_up <- df[df$Gene %in% early_up$Gene,]
+
+p <- ggplot(df, aes(x = measure, color = logFC, y = logFC, group = Gene)) + geom_line() + theme_bw()
+p <- p + geom_hline(yintercept = 0, color = "red") + theme(legend.position = "none")
+p + geom_point(size = 4, aes(color = -log10(adj.P.Val)))
+
+
+
+starve_int$Gene = rownames(starve_int)
+
+si <- starve_int[starve_int$Gene %in% df$Gene,]
+
+#positive change
+positive <- filter(si, CI.L > 0)
+
+tmp <- early_up[early_up$Gene %in% positive$Gene,]
+
+up_and_up <- df[df$Gene %in% tmp$Gene,]
+
+
+
+library(gplots)
+top_overall_genes <- filter(df, measure=="all") %>% arrange(desc(abs(logFC)))
+genes <- top_overall_genes$Gene[1:100]
+mycol <- colorpanel(1000,"blue","white","red")
+
+subset <- df[df$Gene %in% genes,]
+
+p <- ggplot(subset, aes(x = measure, y = Gene, fill = logFC)) + geom_tile()
+
+p <- p + scale_fill_viridis(discrete = FALSE)
+
+heat.mat <- as.matrix()
+
+heatmap.2(subset$logFC, scale="row",
+          labRow=rownames(subset), labCol=group, 
+          col=, trace="none", density.info="none", 
+          margin=c(8,6), lhei=c(2,10), dendrogram="column")
+
+plotMD(efit, column=2, status=dt[,2], main=colnames(efit)[2], 
+       xlim=c(-8,13))
+
+filter(df, measure=="all") %>% arrange(desc(abs(logFC)))[1:100]
+
+glMDPlot(efit, coef=6, status=decideTests(efit), main=colnames(efit)[6],
+         anno=y$genes, counts=y$counts, side.main="Gene")
+
+
+##ideas for field stuff... 
+library(maSigPro)
+design <- read.csv("F:/Antarctic_copepods/Chl/Propinquus_factors.csv")
+
+y <- y[,c(1:16)]
+cpms <- cpms[,c(1:16)]
+
+Full_design <- cbind(design$avg_upper_temp, design$max_upper_temp, design$int_chl,  
+                     design$max_chl)
+rownames(Full_design) <- design$tmp_Sample
+colnames(Full_design) <- c("avg_upper_temp", "max_upper_temp", "int_chl", "max_chl")
+
+Full_design <- cbind(design$int_chl,  
+                     design$max_chl, design$avg_upper_temp, design$max_upper_temp)
+rownames(Full_design) <- design$tmp_Sample
+colnames(Full_design) <- c("int_chl", "max_chl", "avg_upper_temp", "max_upper_temp" )
+
+
+tc.tstep <- T.fit (data = y$counts[1:1000,], design = Full_design, 
+                   step.method = "two.ways.backward", min.obs = 10, alfa = 0.05)
+tc.tstep$sol # gives the p.values of the significant 
+# regression coefficients of the optimized models
+
+tc.tstep <- T.fit (data = y$counts[1:1000,], design = Full_design, 
+                   step.method = "two.ways.forward", min.obs = 10, alfa = 0.05)
+tc.tstep$sol # gives the p.values of the significant 
+# regression coefficients of the optimized models
+
+design_list <- list(
+  None=cbind(Int=rep(1, 16)),
+  max_chl = cbind(Int=1, max_chl=design$max_chl),
+  int_chl = cbind(Int=1, int_chl=design$int_chl),
+  max_temp = cbind(Int=1, max_temp=design$max_upper_temp),
+  mean_temp = cbind(Int=1, mean_temp=design$avg_upper_temp)
+)
+out <- selectModel(y$counts, design_list)
+table(out$pref)
+
+design_list <- list(
+  None=cbind(Int=rep(1, 16)),
+  max_chl = cbind(Int=1, max_chl=design$max_chl),
+  int_chl = cbind(Int=1, int_chl=design$int_chl)
+)
+out <- selectModel(y$counts, design_list)
+table(out$pref)
+
+design_list <- list(
+  None=cbind(Int=rep(1, 16)),
+  max_temp = cbind(Int=1, max_temp=design$max_upper_temp),
+  mean_temp = cbind(Int=1, mean_temp=design$avg_upper_temp)
+)
+out <- selectModel(y$counts, design_list)
+table(out$pref)
+#so, more genes are fit by int_chl than max_chl, and by mean_temp than max_temp.
+
+design_list <- list(
+  None=cbind(Int=rep(1, 16)),
+  Add = cbind(Int=1, int_chl=design$int_chl, mean_temp=design$avg_upper_temp),
+  Interaction = cbind(Int=1, Chl_Tmp = design$int_chl * design$avg_upper_temp),
+  Full = cbind(Int=1, int_chl=design$int_chl, mean_temp=design$avg_upper_temp, 
+               Chl_Tmp = design$int_chl * design$avg_upper_temp)
+)
+out <- selectModel(y$counts, design_list)
+table(out$pref)
+#more genes are fit by the full model.
+ 
+#now, is model fit improved by adding Depth and Copepod volume/density?
+#Keep these additive
+
+design_list <- list(
+  None=cbind(Int=rep(1, 16)),
+  Vol = cbind(Int=1, Vol = design$Copepod_vol),
+  Num = cbind(Int=1, Num = design$Copepod_num)
+)
+out <- selectModel(y$counts, design_list)
+table(out$pref)
+#Copepod "volume" fits more genes than copepod number
+
+design_list <- list(
+  None=cbind(Int=rep(1, 16)),
+  Full = cbind(Int=1, int_chl=design$int_chl, mean_temp=design$avg_upper_temp, 
+               Chl_Tmp = design$int_chl * design$avg_upper_temp),
+  Depth = cbind(Int=1, int_chl=design$int_chl, mean_temp=design$avg_upper_temp, 
+               Chl_Tmp = design$int_chl * design$avg_upper_temp, Depth = design$Depth),
+  Vol = cbind(Int=1, int_chl=design$int_chl, mean_temp=design$avg_upper_temp, 
+                Chl_Tmp = design$int_chl * design$avg_upper_temp, Vol = design$Copepod_vol),
+  Both = cbind(Int=1, int_chl=design$int_chl, mean_temp=design$avg_upper_temp, 
+               Chl_Tmp = design$int_chl * design$avg_upper_temp, Depth = design$Depth,
+               Vol = design$Copepod_vol)
+)
+out <- selectModel(y$counts, design_list)
+table(out$pref)
+#more genes are fit by the full model.
+
+round(cor(design_list$Both), 2)
+#basically we have multi-collinearities in the data. Depth is highly correlated with mean_temp, 
+#and copepod_vol is strongly correlated with the Chl:Temp interaction.
+
+#So we have a design in which chlorophyll, temperature, and their interaction explain a lot of gene expression variance.
+#okay, great. However, we might also be interested in non-linear effects of either chl or temperature. 
+#This might not be prevalent with Propinquus, but we have more acutus data. 
+
+#Let's start with chl.
+cpms = cpms[,c(1:16)]
+Expr_df <- melt(cpms)
+names(Expr_df) <- c("Gene", "Sample", "cpm")
+Expr_df$Chl <- design[match(Expr_df$Sample, design$tmp_Sample),]$int_chl
+Expr_df$Temp <- design[match(Expr_df$Sample, design$tmp_Sample),]$avg_upper_temp
+Expr_df$Chl <- design[match(Expr_df$Sample, design$tmp_Sample),]$int_chl
+
+## Using dlply, fit linear and non-linear models to each gene
+# Create pCO2^2 variable in df_all_log
+Expr_df$Chl_2 <- Expr_df$Chl**2
+
+# Fit linear models - should take about 4 minutes
+lms <- dlply(Expr_df, c("Gene"), function(df) 
+  lm(cpm ~ Chl + Temp + Chl:Temp, data = df))
+
+# Fit non-linear models - should take about 2 minutes
+nlms <- dlply(Expr_df, c("Gene"), function(df) 
+  lm(cpm ~ Chl + Chl_2 + Temp + Chl:Temp + Chl_2:Temp, data = df)) #these last two will not be estimable
+
+# Output nlm coefficients into dataframe
+nlms_coeff <- ldply(nlms, coef)
+head(nlms_coeff)
+
+library(lmtest)
+## Apply LRTs to lm's and nlm's for each transcript - should take about 2 minutes
+lrts <- list() # Create list to add LRT results to
+
+for (i in 1:length(lms)) {
+  lrts[[i]] <- lrtest(lms[[i]], nlms[[i]]) # Apply LRTs with for loop
+}
+
+## Filter lrt results for transcripts with significantly higher likelihoods of nl model
+lrt_dfs <- list()
+
+# Turn list of LRT outputs into list of dataframes containing output info
+for (i in 1:length(lrts)) {
+  lrt_dfs[[i]] <- data.frame(lrts[i])
+}
+
+# Create singular dataframe with geneids and model outputs for chi-squared and LRT p-value
+lrt_coeff_df  <- na.omit(bind_rows(lrt_dfs, .id = "column_label")) # na.omit removes first row of each df, which lacks these data
+
+# Add geneid based on element number from original list of LRT outputs
+lrt_coeff_df <- merge(lrt_coeff_df,
+                      data.frame(geneid = names(nlms),
+                                 column_label = as.character(seq(length(
+                                   nlms
+                                 )))),
+                      by = "column_label")
+
+# Apply FDR adjustment to LRT p-values before filtering for sig non-linear effects
+lrt_coeff_df$FDR <- p.adjust(lrt_coeff_df$Pr..Chisq., method = "fdr")
+
+# Filter LRT results for sig FDR coeff... produces 162 genes
+lrt_filt <- filter(lrt_coeff_df, FDR < 0.05)
+
+## Plot sig nl genes according to LRT, grouped by timepoint and direction of beta 1 coefficient
+# Add beta coefficients to logCPM df
+pCO2_pos <- filter(nlms_coeff, Chl > 0)
+pCO2_2_pos <- filter(nlms_coeff, Chl_2 > 0)
+
+# Bin genes based on positive or negative pCO2 and pCO2^2 betas
+Expr_df$pCO2_binom <- ifelse(Expr_df$Gene %in% pCO2_pos$geneid, "Positive", "Negative")
+Expr_df$pCO2_2_binom <- ifelse(Expr_df$Gene %in% pCO2_2_pos$geneid, "Concave", "Convex")
+
+# Filter for how many gene id's with significant likelihood of nl effect in LRT
+LRT_filt_df <- filter(Expr_df, Gene %in% lrt_filt$geneid)
+
+genes = unique(LRT_filt_df$Gene)[1:100]
+
+# Plot
+ggplot(data = LRT_filt_df[LRT_filt_df$Gene %in% genes,],
+       aes(x = Chl, y = cpm)) +
+  geom_path(
+    alpha = 0.25,
+    size = 0.25,
+    stat = "summary",
+    aes(group = as.factor(Gene))
+  ) +
+  facet_grid(pCO2_2_binom ~ .) +
+  geom_smooth(method = "loess", se = FALSE, span = 1) +
+  theme_classic() +
+  theme(strip.background = element_blank()) +
+  labs(y = "Avg logCPM", title = "Non-linear changes in GE output by LRTs")
+
+
+##So I don't think we can look at non-linearities, because that would already be captured by relationship with temperature...
+
+Full_model <- model.matrix(~1 + int_chl*avg_upper_temp, data=design)
+
+Voom <- voomWithQualityWeights(y, Full_model, plot = T)
+lm_Voom_fit <- lmFit(Voom, Full_model)
+
+cont_temp <- contrasts.fit(lm_Voom_fit, coef = c(2:4))
+efit <- eBayes(cont_temp)
+
+a = summary(decideTests(efit))
+
+plotSA(efit, main="Final model: Mean-variance trend")
+
+###pca
+library(vegan)
+
+logCPM.pca <- prcomp(t (cpms))
+logCPM.pca.proportionvariances <-
+  ((logCPM.pca$sdev ^ 2) / (sum(logCPM.pca$sdev ^ 2))) * 100
+
+treatments$Group <- gsub("_NA", "", treatments$Group)
+
+treatments$int_chl <- NA
+treatments$avg_upper_temp <- NA
+
+treatments[1:16,]$int_chl <- Full_design$int_chl
+treatments[1:16,]$avg_upper_temp <- Full_design$avg_upper_temp
+
+ord.fit <- envfit(logCPM.pca$x ~ int_chl + avg_upper_temp, data=treatments, perm=999, choices = c(1:10), na.rm=T)
+ord.fit
+
+png(res=300, width=6, height=4, units='in', filename = "F:/Antarctic_copepods/starve/Prop_PCA_ordi_chl.png")
+plot(
+  logCPM.pca$x,
+  type = "n",
+  main = NA,
+  xlab = paste("PC1, ", round(logCPM.pca.proportionvariances[1], 2), "%"),
+  ylab = paste("PC2, ", round(logCPM.pca.proportionvariances[2], 2), "%")
+)
+
+points(logCPM.pca$x,
+       col = "black",
+       pch = 16,
+       cex = 1)
+
+ordihull(
+  logCPM.pca$x,
+  as.factor(treatments$Group),
+  border = NULL,
+  lty = 2,
+  lwd = .5,
+  col = color,
+  draw = "polygon",
+  alpha = 75,
+  cex = .5,
+  label = T
+)
+
+plot(ord.fit)
+dev.off()
+
+#just field:
+field_cpms <- cpms[,c(1:16)]
+
+logCPM.pca <- prcomp(t (field_cpms))
+logCPM.pca.proportionvariances <-
+  ((logCPM.pca$sdev ^ 2) / (sum(logCPM.pca$sdev ^ 2))) * 100
+
+
+ord.fit <- envfit(logCPM.pca$x ~ int_chl + avg_upper_temp, data=Full_design, perm=999, choices = c(1:10))
+ord.fit
+
+png(res=300, width=6, height=4, units='in', filename = "F:/Antarctic_copepods/starve/Prop_PCA_field.png")
+
+plot(
+  logCPM.pca$x,
+  type = "n",
+  main = NA,
+  xlab = paste("PC1, ", round(logCPM.pca.proportionvariances[1], 2), "%"),
+  ylab = paste("PC2, ", round(logCPM.pca.proportionvariances[2], 2), "%")
+)
+
+points(logCPM.pca$x,
+       col = "black",
+       pch = 16,
+       cex = 1)
+
+ordihull(
+  logCPM.pca$x,
+  as.factor(treatments[1:16,]$Group),
+  border = NULL,
+  lty = 2,
+  lwd = .5,
+  col = color,
+  draw = "polygon",
+  alpha = 75,
+  cex = .5,
+  label = T
+)
+
+plot(ord.fit)
+dev.off()
+
