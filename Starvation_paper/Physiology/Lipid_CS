@@ -1,0 +1,313 @@
+library(data.table)
+library(ggplot2)
+library(FSA)
+library(dplyr)
+library(reshape2)
+library(plotrix)
+library(FactoMineR)
+library(factoextra)
+library(vegan)
+library(coin)
+library(ggdist)
+
+setwd("F:/Antarctic_copepods/Lipids/")
+
+#this is the lipid data without the "unknown" neutral lipid, see manuscript
+df_lipids <- read.csv("Copepod_lipids_noUnk.csv") 
+df_lipids # this data frame has quantified lipids (ug), which we can then convert to per unit weight, 
+#or as a proportion of total Lipids
+
+lipids_Weight <- df_lipids %>% dplyr::select(WE, TAG, Unknown_Neutral_Lipid, ST,
+                                             Polar_Lipids, FFA) / df_lipids$Wet_weight
+rownames(lipids_Weight) <- df_lipids$ID
+
+lipids_Proportion <- df_lipids %>% dplyr::select(WE, TAG, Unknown_Neutral_Lipid, ST, 
+                                                 Polar_Lipids, FFA) / df_lipids$Total
+rownames(lipids_Proportion) <- df_lipids$ID
+
+lipids_indiv <- df_lipids %>% dplyr::select(WE, TAG, Unknown_Neutral_Lipid, ST,
+                                            Polar_Lipids, FFA) / df_lipids$n
+rownames(lipids_indiv) <- df_lipids$ID
+
+rowSums(lipids_indiv)[1:9]
+
+#First, let's look for differences in total lipid content, and the major lipid classes. 
+
+#this approach uses the Fisher-Pitman permutation test, an alternative to ANOVA (no distirbutional requirements)
+
+df_lipids$Species <- as.factor(df_lipids$Species)
+#sometimes you just don't have time to code a nice function...
+df_lipids$lip_weight <- df_lipids$Total / df_lipids$Wet_weight
+
+oneway_test(lip_weight ~ Species,
+            data = df_lipids, distribution=approximate(nresample=9999))
+#p=0.003
+
+summary(Total ~ Species, data=df_lipids)
+df_lipids %>% group_by(Species) %>% summarize(mean(Total),sd(Total))
+summary(lip_weight ~ Species, data=df_lipids)
+df_lipids %>% group_by(Species) %>% summarize(mean(lip_weight),sd(lip_weight))
+
+#per individual
+df_lipids$indiv <- df_lipids$Total / df_lipids$n
+
+
+
+perm_data %>% group_by(Species) %>% summarize(mean(WE))
+
+to_plot <- melt(perm_data[,-3])
+to_plot$variable <- factor(to_plot$variable, levels=c("WE", "TAG", "Polar_Lipids", "ST", "FFA"))
+
+starve_cols <- c("#E76254FF", "#EF8A47FF", "#AADCE0FF", "#72BCD5FF", "#376795FF")
+
+png(res=300, heigh=6, width=6, units='in', file="Lipid_class_boxplot_point_V2.png")
+ggplot(to_plot, aes(x=Species, y=value, fill=variable)) +
+  geom_point(pch=21,position = position_jitterdodge()) + geom_boxplot(outlier.size=0) + 
+  labs(y="Lipid per weight (ug lipid / mg WW?)", fill="Lipid class") + theme_bw() +
+  scale_fill_viridis_d(option="plasma")
+dev.off()
+
+png(res=300, heigh=6, width=6, units='in', file="Lipid_class_boxplot_V2.png")
+ggplot(to_plot, aes(x=Species, y=value, fill=variable)) +
+  geom_boxplot(outlier.colour = NULL) + 
+  labs(y="Lipid per weight (ug lipid / mg WW?)", fill="Lipid class") + theme_bw()  +
+  scale_fill_viridis_d(option="plasma")
+dev.off()
+
+png(res=300, heigh=6, width=6, units='in', file="Lipid_class_interval_V2.png")
+ggplot(to_plot, aes(x=Species, y=value, color=variable)) +
+  stat_pointinterval(position="dodge", size=9, point_interval = "mean_qi", point_color="black") +
+  labs(y="Lipid per weight (ug lipid / mg WW?)", fill="Lipid class") + theme_bw() +
+  scale_color_viridis_d(option="plasma")
+dev.off()
+
+##and proportions
+to_plot <- lipids_Proportion[,-3]
+to_plot$Species <- as.factor(df_lipids$Species)
+
+to_plot <- melt(to_plot)
+
+to_plot$variable <- factor(to_plot$variable, levels=c("WE", "TAG", "Polar_Lipids", "ST", "FFA"))
+
+png(res=300, heigh=6, width=6, units='in', file="Lipid_class_proportion_V2.png")
+ggplot(to_plot, aes(x=Species, y=value, fill=variable)) +
+  geom_col(position="fill") + 
+  labs(y="% total lipid", fill="Lipid class") + theme_bw() + scale_fill_viridis_d(option="plasma")
+dev.off()
+
+lipids_Proportion$Fed <- as.factor(df_lipids$Fed)
+to_plot <- lipids_Proportion[!is.na(lipids_Proportion$Fed),-3]
+to_plot$Species <- c(rep("Calanus propinquus", 5), rep("Calanoides acutus", 10))
+
+to_plot <- to_plot %>% pivot_longer(!c(Fed, Species), names_to="class", values_to="value")
+to_plot$class <- factor(to_plot$class, levels=c("WE", "TAG", "Polar_Lipids", "ST", "FFA"))
+
+png(res=300, heigh=4, width=6, units='in', file="Lipid_class_feeding_V2.png")
+ggplot(to_plot, aes(x=Fed, y=value, fill=class)) +
+  geom_col(position="fill") + 
+  labs(y="% total lipid", fill="Lipid class") + theme_bw() + 
+  scale_fill_viridis_d(option="plasma") + facet_grid(.~Species)
+dev.off()
+
+#total lipids
+lipids_Weight$Fed <- as.factor(df_lipids$Fed)
+to_plot <- lipids_Weight[!is.na(lipids_Weight$Fed),-3]
+to_plot$Species <- c(rep("Calanus propinquus", 5), rep("Calanoides acutus", 10))
+
+to_plot <- to_plot %>% pivot_longer(!c(Fed, Species), names_to="class", values_to="value")
+to_plot$class <- factor(to_plot$class, levels=c("WE", "TAG", "Polar_Lipids", "ST", "FFA"))
+
+png(res=300, heigh=4, width=6, units='in', file="Lipid_class_weight_feeding_V2.png")
+ggplot(to_plot, aes(x=Fed, y=value, fill=class)) +
+  geom_bar(stat="summary", fun="mean") + 
+  labs(y="% lipid / wet weight", fill="Lipid class") + theme_bw() + 
+  scale_fill_viridis_d(option="plasma") + facet_grid(.~Species)
+dev.off()
+
+## Is there an effect of feeding on total lipid content?
+
+df_lipids$Fed <- as.factor(df_lipids$Fed)
+oneway_test(lip_weight ~ Fed,
+            data = df_lipids[df_lipids$Species=="Calanoides acutus",], 
+            distribution=approximate(nresample=99999)) #more perms because very close to 0.05
+#p = 0.052
+
+oneway_test(indiv ~ Fed,
+            data = df_lipids[df_lipids$Species=="Calanoides acutus",], 
+            distribution=approximate(nresample=99999)) #more perms because very close to 0.05
+#p = 0.038
+
+df_lipids %>% group_by(Species, Fed) %>% summarize(mean(indiv),sd(indiv))
+#Calanoides : 147+-37 vs 86+-33.5
+#Calanus: 36.1 + 4.13, 40.7+-10.3
+
+df_lipids %>% group_by(Species, Fed) %>% summarize(mean(lip_weight))
+
+oneway_test(lip_weight ~ Fed,
+            data = df_lipids[df_lipids$Species=="Calanus propinquus",], 
+            distribution=approximate(nresample=99999)) 
+#p = 0.5
+
+oneway_test(indiv ~ Fed,
+            data = df_lipids[df_lipids$Species=="Calanus propinquus",], 
+            distribution=approximate(nresample=99999)) 
+#p = 0.7
+
+####
+
+#All right... fatty acid/alcohol comp. data. We can look at this in 
+#multivariate space using correspondance analysis (these data are proportional)
+
+FA_data <- read.csv("lipidR_test.csv", row.names = 1)
+
+FA_data <- FA_data[,colSums(is.na(FA_data)) == 0]
+FA_data <- t( FA_data[rowSums(FA_data) != 0,] )
+
+##
+##Correspondence analysis of proprtions: 
+#unconstrained
+group_data <- df_lipids[df_lipids$ID %in% rownames(FA_data),]
+
+ca_unc <- cca(FA_data, data=group_data$Group)
+anova(ca_unc, permutations=9999)
+
+colvec <- c("red2", "mediumblue")
+
+group_data$Group <- as.factor(group_data$Group)
+group_data$Species <- as.factor(group_data$Species)
+
+plot(ca_unc, type = "n")
+
+with(group_data, points(ca_unc, display = "sites", col = colvec[Species],
+                        pch = 21, bg = colvec[Species]))
+
+#text(ca_unc, display = "species", cex = 0.8, col = "darkcyan")
+text(ca_unc, display = "sites", cex = 0.8, col = "black")
+
+with(group_data, legend("topright", legend = levels(Species), bty = "n",
+                        col = colvec, pch = 21, pt.bg = colvec))
+
+res.ca <- CA(t(FA_data), graph = F)
+
+summary(res.ca)
+
+fviz_ca_col(res.ca, habillage = group_data$Species, label="none")
+
+group_data[is.na(group_data$Fed),]$Fed <- "Field"
+
+png(res=600, width=6, height=4, units='in', file="FAA_CA.png")            
+fviz_ca_col(res.ca, label="none") +
+  geom_vline(xintercept = 0, color="white", size=2) + geom_hline(yintercept = 0, color="white", size=2) +
+  geom_point(size=3, aes(shape = factor(group_data$Species), colour = factor(group_data$Fed))) +
+  ggtitle("Unconstrained CA, fatty acids and alcohols") +  scale_color_manual(values=c("#1E466EFF", "darkgrey", "#E76254FF")) + 
+  labs(shape="Species", color="Group") + scale_shape_discrete(labels=c("Calanoides", "Calanus")) + theme_classic() 
+dev.off()
+
+png(res=600, width=6, height=4, units='in', file="FAA_biplot_rows.png")
+fviz_ca_biplot(res.ca, label="row", select.row=list(contrib=5), arrows = c(T,F))
+dev.off()
+
+#constrained: 
+ca_Sp <- cca(FA_data ~ Species, data=group_data)
+plot(ca_Sp)
+summary(ca_Sp)
+
+#get contribution of "Species" (lipids) to 1st axis
+sort( round(100*scores(ca_Sp, display="sp", scaling=0)[,1]**2 / 
+              sum(scores(ca_Sp, display="sp", scaling=0)[,1]**2), 3), decreasing = TRUE)
+
+#15:00, 18:1n-11?, 17:00, 22:00, and 22:6n-3 contributed the most to this axis.
+
+#now just consider experimental samples
+drop <- which(group_data$Group=="Field")
+FA_data <- FA_data[-drop,]
+FA_data <- FA_data[,colSums(FA_data)>0]
+
+group_data <- group_data[group_data$Group!="Field",]
+
+ca_const <- cca(FA_data ~ Species*Fed, data=group_data)
+plot(ca_const)
+summary(ca_const)
+
+anova(ca_const, permutations=9999)
+anova(ca_const, by="axis", permutations=9999)
+anova(ca_const, by="terms", permutations=9999)
+anova(ca_const, by="margin", permutations=9999)
+#Only Species is signficant
+
+#Analyze species separately: 
+#Calanoides:
+FA_Acutus <- FA_data[rownames(FA_data) %in% df_Acutus$ID,]
+
+ca_const <- cca(FA_Acutus ~ Fed, data=df_Acutus)
+ca_const
+
+anova(ca_const, permutations=9999) #p=0.17, stop here.
+plot(ca_const)
+
+#Calanus: 
+FA_Prop <- FA_data[1:5,]
+
+ca_const <- cca(FA_Prop ~ Fed, data=df_Prop) 
+ca_const
+
+anova(ca_const, permutations=9999) #p=0.017
+
+plot(ca_const)
+sort( round(100*scores(ca_const, display="sp", scaling=0)[,1]**2 / 
+              sum(scores(ca_const, display="sp", scaling=0)[,1]**2), 3), decreasing = TRUE)
+
+
+#Citrate synthase stuff
+
+CS_prop <- read.csv("F:/Antarctic_copepods/Lipids/CS_Cp_Experiment.csv")
+CS_acutus <- read.csv("F:/Antarctic_copepods/Lipids/CS_Ca_Experiment.csv")
+
+CS_prop$Time = as.factor(CS_prop$Time)
+
+CS_Pr_expt <- CS_prop[4:15,]
+
+ggplot(CS_prop, aes(x=Time, y=CS_weight, fill=Group)) + geom_boxplot(outlier.size=0) + 
+  geom_point(pch=21, position=position_jitterdodge(), size=3) + theme_bw() + ylab("CS activity (U/mg wet weight)") 
+
+png(res=600, width=6, height=6, units='in', file="Prop_CS_D59.png")
+ggplot(CS_Pr_expt, aes(x=Time, y=CS_weight, fill=Group)) + geom_boxplot(outlier.size=0) + 
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 420), 
+             aes(group = Group), show.legend = F, size = 4) +
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 420),
+             aes(color=Group), show.legend = F, size=3) + theme_bw() + ylab("CS activity (U/mg wet weight)") + 
+  scale_fill_manual(values=c("#376795FF", "#E76254FF")) + scale_color_manual(values=c("#72BCD5FF", "#EF8A47FF")) + xlab("Day")
+dev.off()
+
+
+png(res=600, width=6, height=6, units='in', file="Prop_CS_D059.png")
+ggplot(CS_prop, aes(x=Time, y=CS_weight, fill=Group)) + geom_boxplot(outlier.size=0) + 
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 1258), 
+             aes(group = Group), show.legend = F, size = 4) +
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 1258),
+             aes(color=Group), show.legend = F, size=3) + theme_bw() + ylab("CS activity (U/mg wet weight)") + 
+  scale_fill_manual(values=c("#376795FF", "#E76254FF")) + scale_color_manual(values=c("#72BCD5FF", "#EF8A47FF")) + xlab("Day")
+dev.off()
+
+CS_acutus$Time = as.factor(CS_acutus$Time)
+CS_acutus_expt <- CS_acutus[5:24,]
+
+png(res=600, width=6, height=6, units='in', file="Acutus_CS_D59.png")
+ggplot(CS_acutus_expt, aes(x=Time, y=CS_weight, fill=Group)) + geom_boxplot(outlier.size=0) + 
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 420), 
+             aes(group = Group), show.legend = F, size = 4) +
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 420),
+             aes(color=Group), show.legend = F, size=3) + theme_bw() + ylab("CS activity (U/mg wet weight)") + 
+  scale_fill_manual(values=c("#376795FF", "#AADCE0FF", "#E76254FF")) + scale_color_manual(values=c("#72BCD5FF", "#AADCE0FF", "#EF8A47FF")) + xlab("Day")
+dev.off()
+
+
+png(res=600, width=6, height=6, units='in', file="Acutus_CS_D059.png")
+ggplot(CS_acutus, aes(x=Time, y=CS_weight, fill=Group)) + geom_boxplot(outlier.size=0) + 
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 1258), 
+             aes(group = Group), show.legend = F, size = 4) +
+  geom_point(position=position_jitterdodge(jitter.width=0.2, seed = 1258),
+             aes(color=Group), show.legend = F, size=3) + theme_bw() + ylab("CS activity (U/mg wet weight)") + 
+  scale_fill_manual(values=c("#376795FF", "#AADCE0FF", "#E76254FF")) + scale_color_manual(values=c("#72BCD5FF", "#AADCE0FF", "#EF8A47FF")) + xlab("Day")
+dev.off()
+
