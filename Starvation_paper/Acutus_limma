@@ -12,6 +12,7 @@ library(edgeR)
 library(limma)
 library(pheatmap)
 library(stringr)
+library(adegenet)
 
 counts_dir = "F:/Antarctic_copepods/Acutus/counts/"
 count_files <- file.path(counts_dir, list.files(counts_dir))
@@ -20,121 +21,11 @@ names(count_files) <- basename(gsub(count_files, pattern = "_quant.sf", replacem
 tx2gene = readr::read_tsv("F:/Antarctic_copepods/Acutus/acutus_clusters.txt")
 
 #design
-
-txi <- tximport(count_files, type="salmon", tx2gene = tx2gene, countsFromAbundance = "lengthScaledTPM")
-y <- DGEList(txi$counts)
-
 group_table = read.table("F:/Antarctic_copepods/Acutus/group_table.txt", header=TRUE)
-rownames(group_table) <- colnames(txi$counts)
-names(group_table) = "group"
 
-
-keep <- rowSums( y$counts >= 15 ) >= 4
-#keep 59,982
-
-y = y[keep,, keep.lib.sizes=TRUE]
-median(y$counts)
-
-y <- calcNormFactors(y)
-cpms = cpm(y, log=TRUE)
-#write.table(cpms, "limma_CPM_withOutlier.txt", quote = FALSE, sep = "\t")
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA.png")
-pca <- prcomp(t(y$counts))
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, counts") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_log.png")
-pca <- prcomp(log2(t(y$counts+0.01)))
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, log2 counts") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_cpm.png")
-pca <- prcomp(t(cpms))
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_Ship.png")
-pca <- prcomp(t(cpms[,c(11:23, 39:49)]))
-df <- cbind(group_table[c(11:23, 39:49),], pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_JustExp.png")
-pca <- prcomp(t(cpms[,c(16:23, 39:49)]))
-df <- cbind(group_table[c(16:23, 39:49),], pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-
-
-#we can see that 9fb is a big outlier, which is driven by some highly-expressed genes
-#Logged values shrink the variance. The log PCA shows some separation between fed/starved, and 
-#ship samples are closer to sties S45 and S62 (they were collected from S45)
-
-select <- order(rowMeans(cpms), decreasing=TRUE)[1:5000]
-Z_scores = t(scale(t(cpms)))
-
-
-#names_new <- 
-#  c("Site 000.100A", "Site 000.100B", "Site 000.100C", "Site 000.100D", "Site 200.000A", "Site 200.000B", "Site 200.000C", "Site 200.000D", 
- #   "Site 100.180A", "Site 100.180B", "Site 100.180C", "Site 100.180D", "Site -100.100A", "Site -100.100B", "Site -100.100C", "Site -100.100D", 
-  #  "Fed Day5A", "Fed Day5B","Fed Day5C", "Fed Day5D", "Starved Day5A", "Starved Day5B", "Starved Day5C", "Starved Day5D", "Fed Day9A","Fed Day9B", "Fed Day9C", "Fed Day9D", "Starved Day9A", "Starved Day9B", "Starved Day9C", "Starved Day9D")
-
-names_new <- 
-  c("Site 616.040a", "Site 616.040b", "Site 616.040c", "Site 616.040d", "Site 616.040e", "Site 400.040a", "Site 400.040b", "Site 400.040c", "Site 400.040d", "Site 400.040e", "Site 200.040a", "Site 200.040b", "Site 200.040c", "Site 200.040d", "Site 200.040e",
-     "Fed Day5a", "Fed Day5b", "Fed Day5c", "Fed Day5d", "Starved Day5a", "Starved Day5b", "Starved Day5c", "Starved Day5d", "Site 200.000a", "Site 200.000b", "Site 200.000c", "Site 200.000d", "Site 200.000e", "Site 000.100a", "Site 000.100b",
-     "Site 000.100c", "Site 000.100d", "Site 000.100e", "Site -100.100a", "Site -100.100b", "Site -100.100c", "Site -100.100d", "Site -100.100e", "Fed Day9a", "Fed Day9b", "Fed Day9c", "Fed Day9d", "Refed Day9a", "Refed Day9b", "Refed Day9c", "Refed Day9d",
-      "Starved Day9a", "Starved Day9b", "Starved Day9c", "Starved Day9d")
-
-
-colnames(Z_scores) <- names_new
-
-#heatmap also confirms that 9fb is an outlier
-png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/Figs/Acutus_heatmap.png")
-pheatmap(Z_scores[select,], cluster_rows = FALSE, show_rownames = FALSE, cluster_cols = TRUE, fontsize = 7)
-dev.off()
-
-sampleDists <- dist(t(Z_scores))
-library("RColorBrewer")
-sampleDistMatrix <- as.matrix(sampleDists)
-colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
-
-png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/Figs/Acutus_distance.png")
-pheatmap(sampleDistMatrix,
-         clustering_distance_rows=sampleDists,
-         clustering_distance_cols=sampleDists,
-         col=colors, fontsize = 8)
-dev.off()
-#so go back and remove 9fb #whooopps
-
+#remove outlier (Fig. S1)
 group_table = as.data.frame(group_table[-40,])
 names(group_table) = "group"
-
 count_files = count_files[-40]
 
 txi <- tximport(count_files, type="salmon", tx2gene = tx2gene, countsFromAbundance = "lengthScaledTPM")
@@ -142,46 +33,15 @@ rownames(group_table) <- colnames(txi$counts)
 y <- DGEList(txi$counts)
 
 keep <- rowSums( y$counts >= 15 ) >= 4
-#now keep 59,540
+#keep 59,540
 
 y = y[keep,, keep.lib.sizes=FALSE]
 
 y <- calcNormFactors(y)
 cpms = cpm(y, log=TRUE)
-#write.table(cpms, "limma_CPM.txt", quote = FALSE, sep = "\t")
-cpms <- read.table("limma_CPM.txt")
+write.table(cpms, "Acutus_limma_CPM.txt", quote = FALSE, sep = "\t")
+cpms <- read.table("Acutus_limma_CPM.txt")
 
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_noOut.png")
-pca <- prcomp(t(y$counts))
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, counts") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_noOut_log.png")
-pca <- prcomp(log2(t(y$counts+0.01)))
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, log2 counts") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_noOut_cpm.png")
-pca <- prcomp(t(cpms))
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-tmp <- paletteer_d("MetBrewer::Hiroshige")
 field_cols <- c("#AA3377", "#66CCEE", "#CCBB44", "#228833", "#4477AA", "#5d5d5d")
 field_labs <- paste0("Field, ", c("616.040", "400.040", "200.040", "200.000", "000.100", "-100.100"))
 field_breaks <- c("S117", "S27", "S45", "S62", "S77", "S81")
@@ -209,27 +69,6 @@ p + scale_color_manual(name = "Group",
                      breaks = c(field_breaks, starve_breaks), 
                      values = c(rep(3, 6), rep(16, 5))) +
   scale_y_reverse() + theme(text = element_text(size = 20), plot.title = element_blank())
-dev.off()
-
-#Lump all Field together: 
-png(res=600, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Acutus_PCA_1field.png")
-pca <- prcomp(t(cpms))
-df <- cbind(group_table, pca$x)
-df[c(1:15, 24:38),]$group <- "Field"
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-p <- ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group, shape=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var*100, 3), "%)")) + 
-  ylab(paste0("PC2 (", signif(PC2_var*100, 3), "%)")) + theme_classic()
-
-p + scale_color_manual(name = "Group",
-                       values = c("black", starve_cols), 
-                       breaks = c("Field", starve_breaks),
-                       labels = c("Field", starve_labs)) + 
-  scale_shape_manual(name = "Group", labels = c("Field", starve_labs),
-                     breaks = c("Field", starve_breaks), 
-                     values = c(3, rep(16, 5))) +
-  scale_y_reverse()
 dev.off()
 
 #And just the Expt
@@ -267,8 +106,6 @@ colnames(design) <- gsub("food", "", colnames(design))
 colnames(design) <- gsub(":", "_", colnames(design))
 
 #we can use DAPC to show that "refed" reverses starved. 
-library(adegenet)
-
 #code modified from Groves et al. 2015
 fed_dat = cpms[,c(16:23,39:41,46:49)]
 refed_dat = cpms[,c(42:45)]
@@ -308,9 +145,6 @@ df %>%
 dev.off()
 ###
 
-#I need to see whether these give the same results. Following the Gordon Smyth example but with my data. . use original dummy coding and cbin t numerically define contrasts. in the simple case with just food and group. 
-
-##4/22 these are all correct wrt. the simple group design
 #This bit may look confusing, but I have double checked that these contrasts are correct.
 #It's just the necessary algebra to deal with the uneven sample design.
 
@@ -347,51 +181,6 @@ lapply(seq(1,8), function(i){
   write.csv(topTable(efit, coef=i, confint=TRUE, number = Inf), file=paste0(colnames(efit)[i], "_efit.csv"))
 })
 
-#add column for signed log pvalues
-lapply(list.files(pattern = "*efit.csv"), function(x){
-  df <- read.csv(x)
-  df$logP <- -log10(df$adj.P.Val)
-  df[df$logFC<0,]$logP = -df[df$logFC<0,]$logP
-  
-  write.csv(df, file=x, quote=F, row.names=F)
-})
-  
-
- 
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_Lipids_cpm.png")
-pca <- prcomp(t(cpms[tmp,])) #n= 1851
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-tmp = protein_genes[protein_genes %in% rownames(cpms)]
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_Prots_cpm.png")
-pca <- prcomp(t(cpms[tmp,])) #n= 6753
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
-tmp = stress_genes[stress_genes %in% rownames(cpms)]
-
-png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/Acutus/Figs/PCA_Stress_cpm.png")
-pca <- prcomp(t(cpms[tmp,])) #n= 4497
-df <- cbind(group_table, pca$x)
-PC1_var <- summary(pca)$importance[2]
-PC2_var <- summary(pca)$importance[5]
-ggplot(df) + geom_point(aes(x=PC1, y=PC2, color=group), size=3)+ 
-  ggtitle("Acutus PCA, CPM") + xlab(paste0("PC1 (", signif(PC1_var, 2), ")")) + 
-  ylab(paste0("PC2 (", signif(PC2_var, 2), ")"))
-dev.off()
-
 ##WGCNA
 library(WGCNA)
 library(psych)
@@ -401,7 +190,7 @@ disableWGCNAThreads()
 load("F:/Antarctic_copepods/Acutus/WGCNA/acutus_signed_bicor.RData")
 
 #filter low-expression
-counts = read.table("limma_CPM.txt", check.names = FALSE)
+counts = read.table("Acutus_limma_CPM.txt", check.names = FALSE)
 
 ##WGCNA wants genes as columns
 dat_expr <- t(counts)
@@ -425,7 +214,7 @@ text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], labels=po
 
 abline(h=0.90,col="red")
 
-soft_power = 7 #(wasn't it 6?)
+soft_power = 7 
 
 options(stringsAsFactors = FALSE);
 lnames = load(file = "F:/Antarctic_copepods/Acutus/WGCNA/acutus_signed_bicor.RData");
@@ -551,26 +340,6 @@ text_mat[which(p_adj < 0.001)] = paste(text_mat[which(p_adj < 0.001)], "*", sep=
 
 mod_names <- substring(rownames(text_mat), 3)
 
-sizeGrWindow(20,12)
-par(mai = c(0.5, 3, 0, 0));
-
-png(units='in', width=20, height=12, res=600, file="F:/Antarctic_copepods/Acutus/Figs/WGCNA_Cor.png")
-
-labeledHeatmap(Matrix = mat,
-               xLabels = colnames(text_mat),
-               yLabels = rownames(text_mat),
-               ySymbols = mod_names,
-               xLabelsAngle = 0,
-               colorLabels = TRUE,
-               setStdMargins = FALSE,
-               colors = blueWhiteRed(50),
-               textMatrix = text_mat,
-               cex.text = 0.95,
-               zlim = c(-0.5,0.5),
-               main = "Module-treatment relationships"
-)
-dev.off()
-
 ##plot for Supplement (relabel columns to match manuscript table)
 mat <- mat[,c(3,4,5,6,7,2)]
 text_mat <- text_mat[,c(3,4,5,6,7,2)]
@@ -598,230 +367,6 @@ labeledHeatmap(Matrix = mat,
                cex.lab.y = 1.25,
                zlim = c(-0.5,0.5),
                
-               main = "Module-treatment relationships"
-)
-dev.off()
-
-
-
-gene_mod_membership = as.data.frame(cor(dat_expr, MEs))
-
-names(gene_mod_membership) = paste("MM", mod_names, sep='_')
-
-
-## module heatmaps
-
-library(gplots)
-library(RColorBrewer)
-
-coolwarm_hcl <- colorspace::diverging_hcl(11,
-                                          h = c(250, 10), c = 100, l = c(20, 95), power = c(0.3, 1.7))
-sample_order = 
-  c("45a", "45b", "45c", "45d", "45e", "4fa","4fb", "4fc", "4fd","4sa", "4sb", "4sc", "4sd", "9fa", "9fc", "9fd", "9ra", "9rb", "9rc", "9rd", "9sa", "9sb", "9sc", "9sd")
-
-sample_order = 
-  c("45a", "45b", "45c", "45d", "45e", "4fa","4fb", "4fc", "4fd","9fa", "9fc", "9fd", "9ra", "9rb", "9rc", "9rd", "4sa", "4sb", "4sc", "4sd","9sa", "9sb", "9sc", "9sd")
-
-#scale data
-z <- t(scale(t(counts)))
-
-module_plot_fun <- function(color){
-  
-  module_genes = module_colors==color
-  
-  png(res=600, units='in', height=4, width=8, file=paste0(color, "_Heatmap_wide.png") )
-  
-  par(oma=c(1,1,1,1))
-  heatmap.2(z[module_genes,sample_order], Colv = F, Rowv = T, 
-            labRow=F , trace="none", dendrogram = "row", key=F, keysize=1, density.info="none", 
-            scale="row", col=coolwarmhcl, margins=c(1,1))
-  
-  dev.off()
-  
-}
-
-sapply(unique(module_colors)[-1], module_plot_fun)
-
-
-## Given a module (color), this function parses it into output for GO MWU (a list of all genes, with 0 for not in module and kME for within-module)
-
-print_for_mwu <- function(color){
-  module_genes = module_colors==color
-  
-  mod_genes <- as.data.frame(rownames(gene_mod_membership))
-  mod_genes[,2] = 0
-  mod_genes[module_genes,2] = gene_mod_membership[module_genes, match(color, mod_names)]
-  
-  write.csv(mod_genes, file=(paste(color, "_kMEs.csv", sep='')), row.names = FALSE, quote = FALSE)
-  
-}
-
-lapply(mod_names, print_for_mwu)
-
-sig_starve = c("magenta", "black", "yellow", "red", "salmon", "turquoise")
-
-sig_ship = c("lightyellow", "red", "lightgreen", "orange", "tan", "darkturquoise", "salmon", "darkred", "darkgrey", "blue", "cyan", "brown", "greenyellow")
-
-
-
-
-
-setwd("F:/Antarctic_copepods/Acutus/limma/")
-
-stress = read.csv("fed_v_S1_efit.csv")
-early = read.csv("starved_early_efit.csv")
-late = read.csv("starved_late_efit.csv")
-starve = read.csv("starved_total_efit.csv")
-
-stress$measure = "stress"
-early$measure = "early"
-late$measure = "late"
-starve$measure = "starve"
-
-
-df = rbind(stress, early, late, starve)
-names(df)[1] = "Gene"
-
-df = df[order(df$Gene),]
-
-df$module = rep(module_colors, each = 4)
-df$up = df$adj.P.Val <= 0.05 & df$logFC > 0
-df$down = df$adj.P.Val <= 0.05 & df$logFC < 0
-
-no_grey = filter(df, module != "grey")
-
-no_grey$module = with(no_grey, reorder(module, as.numeric(up) + as.numeric(down), mean))
-
-p <- ggplot(no_grey, aes(x = module, fill = measure, y = as.numeric(up))) + stat_summary(fun = mean, geom = "bar", position = "dodge")
-p <- p + stat_summary(fun = mean, geom="bar", position = "dodge", aes(y = -as.numeric(down)))
-
-p + theme_bw()
-
-test = MEs
-
-test$sample = rownames(test)
-test$group = treatments$group
-test$food = treatments$food
-
-
-q <- ggplot(test, aes(y = MEred, x = sample, color = food)) + geom_point()
-q
-
-##Compare GO between modules
-red_genes = unique(df$Gene[df$module == "red"])
-magenta_genes = unique(df$Gene[df$module == "magenta"])
-
-red_GO = read.table("../GO/limma/red/parsed_wgcna.txt")
-magenta_GO = read.table("../GO/limma/magenta/parsed_wgcna.txt")
-
-red_GO = red_GO %>% filter(V1 != "term")
-magenta_GO = magenta_GO %>% filter(V1 != "term")
-
-in_both = red_GO[red_GO$V1 %in% magenta_GO$V1,]
-
-only_red = red_GO[!(red_GO$V1 %in% magenta_GO$V1),]
-only_magenta = magenta_GO[!(magenta_GO$V1 %in% red_GO$V1),]
-
-testfun <- function(genes){
-  tmp = df[df$Gene %in% genes,]
-  
-  p <- ggplot(tmp, aes(x = measure, color = Gene, y = logFC)) + geom_point(size=5) + theme_bw()
-  p <- p + geom_hline(yintercept = 0, color = "red")
-  p <- p + geom_errorbar(aes(ymax = CI.R, ymin = CI.L))
-  p
-}
-
-p <- ggplot(tmp, aes(x = measure, color = Gene, y = logFC, group = Gene)) + geom_line() + theme_bw()
-p <- p + geom_hline(yintercept = 0, color = "red")
-
-
-sigs = unique(df$Gene[which(df$adj.P.Val <=0.05)])
-
-df = df[df$Gene %in% sigs,]
-
-levels(df$measure) = c("early", "late", "all")
-
-
-##WGCNA Clusters
-D <- 1-(1+cor(MEs[,-25],use="p"))/2
-hcm = hclust(as.dist(D), method="average")
-plot(hcm)
-
-module_key = as.data.frame(cbind(rownames(gene_mod_membership), module_colors))
-names(module_key) = c("Gene", "cluster")
-
-wgcna <- merge(df, module_key, by="Gene")
-
-p <- ggplot(wgcna, aes(x=measure,y=logFC, group=cluster, colour=cluster)) + 
-  geom_line() +
-  xlab("Time") +
-  ylab("Expression") +
-  labs(title= "Cluster Expression by Time",color = "Cluster") + theme_bw()
-
-
-p + stat_summary(aes(group=cluster), fun=mean, geom="line", colour="green")
-
-
-
-df = data.frame(value = MEs$lightgreen, sample = rownames(MEs), group = treatments$group, food = treatments$food)
-
-p <- ggplot(df, aes(y = value, x = sample, color = food)) + geom_point()
-p
-
-##lemme try subsetting just the lab samples
-
-subs <- MEs[c(16:23, 39:50),]
-samples = treatments[c(16:23, 39:50),]
-
-options(na.action = 'na.pass');
-mm = model.matrix( ~food + day + food:day, data = samples)
-mm[is.na(mm)] <- 0
-
-##categorical data
-model.lm <- lapply(subs, function(x){
-  lm(x ~ mm)
-})
-
-mat <- lapply(model.lm, function(x){
-  text_vect <- x$coefficients
-  text_vect <- text_vect[c(3,4,5,7)] 
-  return(text_vect)
-})
-
-mat <- do.call(rbind, mat)
-
-p_values = lapply(model.lm, function(x){
-  p <- summary(x)$coefficients[,4]
-})
-p_values <- do.call(rbind, p_values)
-
-##remove grey module (which is not a real module) and correct for multiple testing for each variable (model term)
-p_values = p_values[-nrow(p_values), -1]
-p_adj <- apply(p_values, 2, p.adjust, method = "BH")
-
-mat = mat[-nrow(mat), ]
-
-text_mat = matrix(paste(signif(mat, 2), ", p=", signif(p_adj, 2), sep = ""), nrow=nrow(mat), ncol=ncol(mat), dimnames=dimnames(mat))
-
-text_mat[which(p_adj < 0.05)] = paste(text_mat[which(p_adj < 0.05)], "*")
-text_mat[which(p_adj < 0.01)] = paste(text_mat[which(p_adj < 0.01)], "*", sep='')
-text_mat[which(p_adj < 0.001)] = paste(text_mat[which(p_adj < 0.001)], "*", sep='')
-
-mod_names <- substring(rownames(text_mat), 3)
-
-sizeGrWindow(20,12)
-par(mai = c(0.5, 3, 0, 0));
-
-labeledHeatmap(Matrix = mat,
-               xLabels = substring(colnames(text_mat), 3),
-               yLabels = rownames(text_mat),
-               ySymbols = mod_names,
-               colorLabels = TRUE,
-               setStdMargins = FALSE,
-               colors = blueWhiteRed(50),
-               textMatrix = text_mat,
-               cex.text = 0.95,
-               zlim = c(-0.5,0.5),
                main = "Module-treatment relationships"
 )
 dev.off()
