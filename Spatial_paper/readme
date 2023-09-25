@@ -4,3 +4,5 @@ Env_Data contains the script and data used to make:
 1. Maps of environmental data and copepods abundances (Environmental_Parameter_Maps_Fig1.R; Figs 1 and S1 of original submission)
 2. Depth profiles of enviromental measurements (CTD_plots_Fig2.R; Fig. 2 of original submission)
 3. Heat map with correlations among environmental parameters and copepod abundances (CorrPlot_Fig3.R; Fig. 3 of original submission)
+
+Physiology contains the script and data to plot food in gut, reproductive stage and citrate synthase (Fig 5 of original submission). 
