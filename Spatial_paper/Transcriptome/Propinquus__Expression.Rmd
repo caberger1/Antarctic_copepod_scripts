@@ -1,0 +1,144 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Throughout this file, replace "yourpath" with location of files. When writing out files (these lines generally commented out), replace "filename" with your desired filename.
+Setting path is sometimes not intuitive within Rmd file. May need to re-set within blocks.
+
+```{r echo=FALSE}
+rm(list = ls())
+setwd("yourpath")
+library("tximport")
+library("limma")
+library("DESeq2")
+library("edgeR")
+
+# Read in Propinquus clusters file, sample list and reads
+tx2gene = readr::read_tsv("clusters.txt")
+Ssamples <- read.table("Ssamples.txt", header=TRUE)
+Ssamples$Group <- as.factor(Ssamples$Group)
+Sfiles <- file.path(Ssamples$File, "quant.sf")
+# This command is tricky. Need to run it together wit the setwd command
+Limma_txi <- tximport(Sfiles, type="salmon", tx2gene=tx2gene, countsFromAbundance = "lengthScaledTPM")
+
+y_init <- DGEList(Limma_txi$counts)
+
+# filtering
+keep <- rowSums(y_init$counts >= 15 ) >= 4
+y<- y_init[keep,]
+y <- calcNormFactors(y)
+logcpms <- cpm(y, log=TRUE)
+
+#For supp
+cpms <- cpm(y)
+#write.csv(cpms, file="filename.csv")
+
+design <- model.matrix(~0 + Group, data = Ssamples)
+v <- voomWithQualityWeights(y, design, plot=TRUE)
+
+# For WGCNA
+b <- log2(y$counts +1)
+b <- t(b)
+row.names(b) <- Ssamples$File
+#write.csv(b, file="yourpath/CpLog2_for_WGCNA.csv")
+```
+
+```{r}
+setwd("yourpath")
+library("tximport")
+library("DESeq2")
+Stxi <- tximport(Sfiles, type="salmon", tx2gene=tx2gene)
+#Create DESeqDataSet, 
+SddsTxi <- DESeqDataSetFromTximport(Stxi,
+                                    colData = Ssamples,
+                                    design = ~ Group)
+dds <- DESeq(SddsTxi)
+keep <- rowSums(counts(dds)>= 10) >=4
+dds <- dds[keep,]
+```
+
+
+```
+```{r}
+# Run comparisons in limma of each site against mean. 
+# First make contrast matrix 
+
+cmat <- makeContrasts( 
+  S1 = (GroupS1 - (GroupS2 + GroupS3 + GroupS4)/3),
+  S2 = (GroupS2 - (GroupS1 + GroupS3 + GroupS4)/3),
+  S3 = (GroupS3 - (GroupS2 + GroupS1 + GroupS4)/3),
+  S4 = (GroupS4 - (GroupS2 + GroupS3 + GroupS1)/3),
+  levels = colnames(design))
+colnames(cmat) <- abbreviate(colnames(cmat))
+cmat
+
+# Now identify, count and write out DEGs
+library(tidyverse)
+fit <-lmFit(v, design)
+fit2 <- contrasts.fit(fit, cmat)
+fit2 <- eBayes(fit2)
+top1 <- as.data.frame(topTable(fit2, coef=NULL, adjust = "fdr", sort.by="B", number=30000))
+#write.csv(top1, file="yourpath/SiteMeanDE_table.csv")
+
+#Correcting for multiple comparisons
+results2 <- decideTests(fit2, p.value=0.05, method="separate", adjust.method="BH")
+cat("\n DE with global correction for multiple comparisons\n")
+summary(results2)
+results2 <- as.data.frame(results2)
+
+Annot <- read.csv("yourpath/Supp_Calanus_Annotation_with_WGCNA.csv", header=TRUE)
+wanted <- row.names(top1)
+top1$Cluster <-wanted
+Annot %>% filter(Cluster %in% wanted) -> my_output
+my_output <- my_output[,c(2:4,6:13)]
+top = merge(top1, my_output, by = "Cluster")
+
+Site1_results <- as.data.frame(topTable(fit2, coef=1, adjust = "fdr",  number=Inf)) 
+Site1_results <- cbind(rownames(Site1_results), data.frame(Site1_results, row.names=NULL))
+names(Site1_results)[names(Site1_results) == 'rownames(Site1_results)'] <- 'Cluster'
+Site1_results_annot <- merge(Site1_results, my_output, by='Cluster')
+S1_DE <- row.names(filter(results2, `S1`==1 | `S1`==-1))
+S1_DEG <- Site_results_annot[Site_results_annot$Cluster %in% S1_DE, ]
+#write.csv(S1_DEG, file="yourpath/S1_DE.csv")
+
+Site2_results <- as.data.frame(topTable(fit2, coef=2, adjust = "fdr",  number=Inf)) 
+Site2_results <- cbind(rownames(Site2_results), data.frame(Site2_results, row.names=NULL))
+names(Site2_results)[names(Site2_results) == 'rownames(Site2_results)'] <- 'Cluster'
+Site2_results_annot <- merge(Site2_results, my_output, by='Cluster')
+S2_DE <- row.names(filter(results2, `S2`==1 | `S2`==-1))
+S2_DEG <- Site2_results_annot[Site2_results_annot$Cluster %in% S2_DE, ]
+#write.csv(S2_DEG, file="yourpath/S2_DE.csv")
+
+Site3_results <- as.data.frame(topTable(fit2, coef=3, adjust = "fdr",  number=Inf)) 
+Site3_results <- cbind(rownames(Site3_results), data.frame(Site3_results, row.names=NULL))
+names(Site3_results)[names(Site3_results) == 'rownames(Site3_results)'] <- 'Cluster'
+Site3_results_annot <- merge(Site3_results, my_output, by='Cluster')
+S3_DE <- row.names(filter(results2, `S3`==1 | `S3`==-1))
+S3_DEG <- Site3_results_annot[Site3_results_annot$Cluster %in% S3_DE, ]
+#write.csv(S3_DEG, file="yourpath/S3_DE.csv")
+
+Site4_results <- as.data.frame(topTable(fit2, coef=4, adjust = "fdr",  number=Inf)) 
+Site4_results <- cbind(rownames(Site4_results), data.frame(Site4_results, row.names=NULL))
+names(Site4_results)[names(Site4_results) == 'rownames(Site4_results)'] <- 'Cluster'
+Site4_results_annot <- merge(Site4_results, my_output, by='Cluster')
+S4_DE <- c(row.names(filter(results2, `S4`==1 | `S4`==-1)))
+S4_DEG_test <- Site4_results_annot[Site4_results_annot$Cluster %in% S4_DE, ]
+S4_DEG <- Site4_results_annot[Site4_results_annot$Cluster %in% S4_DE, ]
+#write.csv(S4_DEG_test, file="yourpath/S4_DE.csv")
+
+```
+
+```{r}
+# For GoMWU
+Site1_results <- as.data.frame(topTable(fit2, coef=1, adjust = "fdr",  number=Inf)) 
+write.csv(Site1_results, file="yourpath/CpS1_DEGs.csv")
+Site2_results <- as.data.frame(topTable(fit2, coef=2, adjust = "fdr",  number=Inf))  
+write.csv(Site2_results, file="yourpath/CpS2_DEGs.csv")
+Site3_results <- as.data.frame(topTable(fit2, coef=3, adjust = "fdr", number=Inf))
+write.csv(Site3_results, file="yourpath/CpS3_DEGs.csv")
+Site4_results <- as.data.frame(topTable(fit2, coef=4, adjust = "fdr", number=Inf))  
+write.csv(Site4_results, file="yourpath/CpS4_DEGs.csv")
+
+
+```
+

@@ -1,0 +1,17 @@
+File	Group
+S1_rep1	S1
+S1_rep2	S1
+S1_rep3	S1
+S1_rep4	S1
+S2_rep1	S2
+S2_rep2	S2
+S2_rep3	S2
+S2_rep4	S2
+S3_rep1	S3
+S3_rep2	S3
+S3_rep3	S3
+S3_rep4	S3
+S4_rep1	S4
+S4_rep2	S4
+S4_rep3	S4
+S4_rep4	S4
