@@ -1,0 +1,134 @@
+---
+title: "Acutus expression"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Throughout this file, replace "yourpath" with location of files. When writing out files (these lines generally commented out), replace "filename" with your desired filename.
+Setting path is sometimes not intuitive within Rmd file. May need to re-set within blocks.
+
+```{r echo=FALSE}
+rm(list = ls())
+library("tximport")
+library("readr")
+library("ggplot2")
+library("DESeq2")
+setwd("yourpath")
+# Read in Acutus clusters file, sample list and reads
+tx2gene = readr::read_tsv("yourpath/Acutus_clusters.txt")
+Ssamples <- read.table("yourpath/Ca_Field.txt", header=TRUE)
+Ssamples$Group <- as.factor(Ssamples$Group)
+Sfiles <- file.path(Ssamples$File, "quant.sf")
+names(Sfiles) <- basename(gsub(Sfiles, pattern="_quant/quant.sf", replacement=''))
+Stxi <- tximport(Sfiles, type="salmon", tx2gene=tx2gene)
+
+#Create DESeqDataSet, 
+SddsTxi <- DESeqDataSetFromTximport(Stxi,
+                                    colData = Ssamples,
+                                    design = ~ Group)
+
+dds <- DESeq(SddsTxi)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+
+library(limma)
+library(edgeR)
+
+Limma_txi <- tximport(Sfiles, type="salmon", tx2gene=tx2gene, countsFromAbundance = "lengthScaledTPM")
+y <- DGEList(Limma_txi$counts)
+#write.csv(y, file="Ca_TPM.csv")
+
+
+# filtering
+keep <- rowSums( y$counts >= 15 ) >= 4
+#write.csv(keep, file="/Users/atarrant/Documents/Project_Antarctic/Ca_DE/Keep_logical.csv")
+y<- y[keep,]
+y <- calcNormFactors(y)
+design <- model.matrix(~0 + Group, data = Ssamples)
+v <- voomWithQualityWeights(y, design, plot=TRUE)
+#saveRDS(v, "yourpath/Acutus_Voom.rds")
+
+# For supplement (counts file)
+temp <- cpm(y)
+#write.csv(temp, file="/Users/atarrant/Documents/Project_Antarctic/Ca_DE/Ca_cpm.csv")
+
+# For WGCNA
+b <- cpm(y, log=TRUE)
+b <- t(b)
+row.names(b) <- Ssamples$File
+write.csv(b, file="/Users/atarrant/Documents/Project_Antarctic/CaLog2_for_WGCNA.csv")
+
+```
+
+Contrast gene expressions between station groups [200.000 and 200.040] vs. [All others]. 
+Do linear correlations with 4 environmental variables 
+
+```{r}
+#Chunk 2
+library(dplyr)
+CA_treat <- read.csv("yourpath/Acutus_factors.csv", header = TRUE, stringsAsFactors = TRUE)
+Annotation <- read.table("yourpath/Annot_with_modules_concise.txt", header=TRUE, fill=TRUE, sep = "\t", quote="")
+my_data <- readRDS("yourpath/Acutus_Voom.rds")
+
+#Comparing sites 1 and 2 with all other sites; "1" is 200.000 and 200.040, "2" is all other sites.
+design <- model.matrix(~0 + Site_Factor, data = CA_treat)
+fit <-lmFit(v, design)
+comp <- makeContrasts(
+  (Site_FactorS2 + Site_FactorS3)/2 - (Site_FactorS1 + Site_FactorS4 + Site_FactorS5 + Site_FactorS6)/4, 
+  levels=colnames(design))
+fit3 <- contrasts.fit(fit, comp)
+fit3 <- eBayes(fit3, robust=TRUE)
+top1 <- as.data.frame(topTable(fit3, coef=1, adjust = "fdr", sort.by="none", number=49025)) 
+#test <- filter(top1, adj.P.Val < 0.05)
+
+top1 <- cbind(rownames(top1), data.frame(top1, row.names=NULL))
+names(top1)[names(top1) == 'rownames(top1)'] <- 'Cluster'
+top1_annot <- merge(top1, Annotation, by='Cluster')
+UpSiteGroupDE_Sig <- filter(top1_annot, adj.P.Val<0.05 & logFC > 0)
+DownSiteGroupDE_Sig <- filter(top1_annot, adj.P.Val<0.05 & logFC < 0)
+write.csv(UpSiteGroupDE_Sig, file="UpSiteGroupDE_table_annotated.csv")
+write.csv(DownSiteGroupDE_Sig, file="DownSiteGroupDE_table_annotated.csv")
+
+
+#Assessing chlorophyll (integrated), temperature (avg upper), and abundance
+# summary(design) gives the order of the coefficients: Chl, Temp, Calanoides abundance
+design <- model.matrix(~1 + int_chl + avg_upper_temp + Calanoides, data= CA_treat)
+fit <-lmFit(v, design)
+fit <- eBayes(fit, robust=TRUE)
+Chl_results <- as.data.frame(topTable(fit, coef=2, adjust = "fdr", sort.by="none", number=49025))
+Temp_results <- as.data.frame(topTable(fit, coef=3, adjust = "fdr", sort.by="none", number=49025))
+Calanoides_results <- as.data.frame(topTable(fit, coef=4, adjust = "fdr", sort.by="none", number=49025))
+
+#To get total numbers of genes (annotated and unannotated)
+test <- filter(Chl_results, adj.P.Val < 0.05)
+test <- filter(Temp_results, adj.P.Val < 0.05)
+test <- filter(Calanoides_results, adj.P.Val < 0.05)
+
+Chl_results <- cbind(rownames(Chl_results), data.frame(Chl_results, row.names=NULL))
+names(Chl_results)[names(Chl_results) == 'rownames(Chl_results)'] <- 'Cluster'
+Chl_results_annot <- merge(Chl_results, Annotation, by='Cluster')
+UpChl_Sig <- filter(Chl_results_annot, adj.P.Val<0.05 & logFC > 0)
+DownChl_Sig <- filter(Chl_results_annot, adj.P.Val<0.05 & logFC < 0)
+#write.csv(UpChl_Sig, file="filename.csv")
+#write.csv(DownChl_Sig, file="filename.csv")
+
+Temp_results <- cbind(rownames(Temp_results), data.frame(Temp_results, row.names=NULL))
+names(Temp_results)[names(Temp_results) == 'rownames(Temp_results)'] <- 'Cluster'
+Temp_results_annot <- merge(Temp_results, Annotation, by='Cluster')
+UpTemp_Sig <- filter(Temp_results_annot, adj.P.Val<0.05 & logFC > 0)
+DownTemp_Sig <- filter(Temp_results_annot, adj.P.Val<0.05 & logFC < 0)
+#write.csv(UpTemp_Sig, file="filename.csv")
+#write.csv(DownTemp_Sig, file="filename.csv")
+
+Calanoides_results <- cbind(rownames(Calanoides_results), data.frame(Calanoides_results, row.names=NULL))
+names(Calanoides_results)[names(Calanoides_results) == 'rownames(Calanoides_results)'] <- 'Cluster'
+Calanoides_results_annot <- merge(Calanoides_results, Annotation, by='Cluster')
+UpCalanoides_Sig <- filter(Calanoides_results_annot, adj.P.Val<0.05 & logFC > 0)
+DownCalanoides_Sig <- filter(Calanoides_results_annot, adj.P.Val<0.05 & logFC < 0)
+#write.csv(UpCalanoides_Sig, file="filename.csv")
+#write.csv(DownCalanoides_Sig, file="filename.csv")
+
+```
