@@ -11,4 +11,6 @@ This folder contains scripts and most data associated with
 
 "Physiology" contains the script and data to plot food in gut, reproductive stage and citrate synthase (Fig 5 of original submission). 
 
-"WGCNA" contains...THIS IS IN PROGRESS. 
+"WGCNA" contains scripts and files necessary to test for associations of environmental measurements with WGCNA modules and to make associated heat maps:
+* Calanoides acutus (WGCNA_Acutus.R; Figure 6)
+* Calanus propinquus
