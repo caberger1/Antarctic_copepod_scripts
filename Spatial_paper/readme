@@ -6,6 +6,6 @@ This folder contains scripts and most data associated with
 3. Heat map with correlations among environmental parameters and copepod abundances (CorrPlot_Fig3.R; Fig. 3 of original submission)
 
 "Transcriptome" contains
-1. The script and data to make the PCA plot (Fig. 4).
+1. The script (PCA_plots_Fig4.R) and data to make the PCA plot (Fig. 4).
 
 "Physiology" contains the script and data to plot food in gut, reproductive stage and citrate synthase (Fig 5 of original submission). 
