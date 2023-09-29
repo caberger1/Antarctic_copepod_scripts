@@ -1,0 +1,1222 @@
+---
+title: "Comparative Analyses, Calanoides & Calanus"
+author: "Cory Berger"
+output: html_notebook
+---
+
+This notebook contains code for comparative analyses of the starvation response in *Calanoides acutus* and *Calanus propinquus*. Code to generate the input files is found separately in the github repo, as are some specific in-depth analyses (codeml output, overdispersion)
+
+#########~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~PART 1
+######## load in data, including Orthology assignments and DE results
+
+```{r warning=FALSE, message=FALSE}
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(ggplot2)
+library(ape)
+library(ggtree)
+library(tidytree)
+library(treeio)
+library(stringr)
+library(scales)
+library(permute)
+library(WGCNA)
+library(grid)
+library(phytools)
+library(MASS)
+library(stringr)
+library(FSA)
+library(viridis)
+library(forcats)
+library(data.table)
+library(paletteer)
+library(ggdist)
+
+df <- data.table( read.csv("df_060322_Annotated.csv") )
+
+cols <- paletteer_d("MetBrewer::Johnson")
+
+```
+
+#Let's compare and analyze the expression of single-copy orthologs
+```{r}
+table(df$Homology)
+#there are 9087 single-copy pairs
+
+table(interaction(df$Homology, df$DE, df$Species))
+#235 of those are DE in Prop, 843 are DE in Acutus
+
+#let's see how the expression of these genes correlates with one another
+#create a data frame with one column for LFC in each species
+
+single_copy = df[Homology == "Single-copy ortholog",] %>% arrange(OG)
+
+single_LFCs = single_copy %>% dplyr::select(OG, logFC, Species) %>%  tidyr::spread(Species, logFC)
+
+cor.test(single_LFCs$Acutus, single_LFCs$Prop, method = "spearman" )
+#rho = 0.32, explains ~10% of the variance.
+
+#Mikahyev et al. (2015) did this for ants and found rho = 0.14. 
+
+#are these significant? We can test using randomization ie. how many times would we observe such a correlation if ortholog relationships are shuffled?
+
+rand_test <- function(obs, nperm, method = "spearman"){
+  cor_real <- cor(obs[,1], obs[,2], use = 'pairwise.complete.obs', method = method)[1]
+  
+  ##generate nperm permutations of nrow(obs) observations
+  pset <- shuffleSet(nrow(obs), nset = nperm)
+  
+  ##use the permutations to shuffle first column (acutus)
+  shuffs <- apply(pset, 1, function(x){return( as.data.frame(cbind(obs[x,1], obs[,2]))) } )
+  
+  #faster implementation of cor()
+  random_cors = sapply(shuffs, function(x){
+    r = WGCNA::cor(x[,1], x[,2], use = 'pairwise.complete.obs', method = method)
+    return(r)
+  })
+  
+  N = sum(random_cors >= cor_real)
+  p = (N+1) / (nperm+1)
+  
+  return(p)
+}
+
+# for publication, use 1e5 (run on HPC). for runtime, just use 1000
+nperm=1e3
+rand_test(single_LFCs[,c(2,3)], nperm, 'spearman')
+#highly sig.
+
+##Plotting
+get_density <- function(x, y, ...) {
+  dens <- MASS::kde2d(x, y, ...)
+  ix <- findInterval(x, dens$x)
+  iy <- findInterval(y, dens$y)
+  ii <- cbind(ix, iy)
+  return(dens$z[ii])
+}
+
+#just get ones that are not NA (6427 / 9087)
+single_LFCs = single_LFCs %>% filter(!is.na(Acutus), !is.na(Prop))
+
+single_LFCs$density <- get_density(single_LFCs$Acutus, single_LFCs$Prop, n = 500)
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/LFC_cor_SC.png")
+ggplot(single_LFCs, aes(x=Acutus, y=Prop, color=density)) + geom_point() + scale_color_viridis() + geom_smooth(method = "lm", color = "red") + theme_bw() + geom_hline(yintercept =0) + geom_vline(xintercept =0) + labs(title = "LFC, single-copy", x="C. acutus", y="C. propinquus", color="Density") + theme(text=element_text(size=16), 
+                                                                  legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+single_DE <- single_LFCs[single_LFCs$OG %in% df[DE=="DE"]$OG,] #DE in at least one species
+single_DE$Cons <- single_DE$OG %in% df[Starve_conserved=="Yes"]$OG
+
+cor.test(single_DE$Acutus, single_DE$Prop, method = "spearman" )
+#rho=0.45
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/LFC_cor_SC_DE.png")
+ggplot(single_DE %>% arrange(Cons), aes(x=Acutus, y=Prop, color=Cons)) + geom_point(alpha=0.7, size=2) + scale_color_manual(values=c("black", "red"), labels=c("Species-\nspecific", "CSG")) + theme_bw() + geom_hline(yintercept=0) + geom_vline(xintercept =0) + labs(title = "LFC, single-copy, DE", x="C. acutus", y="C. propinquus", color=element_blank()) + theme(text=element_text(size=16), legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+#So the overall gene expression response to starvation across all single-copy orthologs is pretty strongly correlated.
+
+#Variance (SD of log counts) is also correlated. 
+single_var = single_copy %>% dplyr::select(OG, SD, Species) %>% tidyr::spread(Species, SD)
+
+ggplot(single_var, aes(x=Acutus, y=Prop)) +
+geom_point()+ geom_smooth(method=lm) + geom_hline(aes(yintercept = 0)) + geom_vline(aes(xintercept = 0))
+
+cor.test(single_var$Acutus, single_var$Prop, method = "spearman" )
+#rho = 0.78
+
+#However, variance is strongly affected by expression level, and also includes both technical and biological variance. We used the approach of Fair et al. 2020 to model Biological variance as overdispersion of negative binomial model relative to Poisson (see "Overdispersion Analysis"). After using LOESS to regress out mean expression level, we get an estimate of each gene's dispersion relative to other genes at the same expression level. 
+
+#sanity check
+ggplot(single_copy %>% drop_na(Dispersion), aes(y=SD, x=AveExpr, color = Dispersion)) + geom_point() + scale_color_gradient2() + facet_grid(.~Species)
+#has the pattern we would expect
+
+Disp = single_copy %>% dplyr::select(OG, Dispersion, Species) %>%  tidyr::spread(Species, Dispersion)
+Disp <- na.omit(Disp)
+Disp$density <- get_density(Disp$Acutus, Disp$Prop, n = 500)
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Dispersion_cor.png")
+ggplot(Disp, aes(x=Acutus, y=Prop, color=density)) + geom_point() + scale_color_viridis() + geom_smooth(method = "lm", color = "red") + theme_bw() + geom_hline(yintercept =0) + geom_vline(xintercept =0) + labs(title = "Dispersion, single-copy", x="C. acutus", y="C. propinquus", color="Density") + theme(text=element_text(size=16), legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+cor.test(Disp$Acutus, Disp$Prop, method = "spearman" )
+#rho=0.62 (0.56 Field)
+
+#Thus, the expression-normalized variance of single-copy orthologs is also correlated.
+rand_test(Disp[,c(2,3)], nperm=1e3)
+#and highly sig
+
+
+#############~~~~~~~~~~~~~~~End single-copy correlation ~~~~~~~~~
+
+```
+
+
+We could also extend this "correlation" analysis more broadly to other genes. Does the AVERAGE LFC/t/whatever correlate across orthogroups.
+```{r}
+
+homologs <- df[Homology == "Homolog",] %>% dplyr::select(OG, Gene, logFC, Species, Dispersion, SE) %>% filter(!is.na(logFC))
+
+homologs <- homologs %>% group_by(OG) %>% filter(any(Species=="Acutus") & any(Species=="Prop"))
+
+homologs <- homologs %>% group_by(OG, Species) %>% mutate(mean_LFC = mean(logFC),  mean_Disp=mean(Dispersion)) %>% arrange(OG)
+
+homologs = data.table(homologs)
+
+homologs <- homologs %>% group_by(OG, Species) %>% mutate(Weighted_LFC = weighted.mean(logFC, (1/SE**2), na.rm=T))
+
+homo_LFC = homologs %>% dplyr::select(OG, mean_LFC, Species) %>% distinct %>% tidyr::spread(Species, mean_LFC)
+homo_Disp = homologs %>% dplyr::select(OG, mean_Disp, Species) %>% distinct %>% tidyr::spread(Species, mean_Disp)
+homo_weighted = homologs %>% dplyr::select(OG, Weighted_LFC, Species) %>% distinct %>% tidyr::spread(Species, Weighted_LFC)
+
+#we end up with 9243 orthogroups with gene expr in both species
+
+cor(homo_LFC$Acutus, homo_LFC$Prop, method = "spearman" ) #r=rho=0.29
+cor(homo_Disp$Acutus, homo_Disp$Prop, method = "spearman", use = 'pairwise.complete.obs' ) #rho=0.47, 0.42 field
+cor(homo_weighted$Acutus, homo_weighted$Prop, method = "spearman" ) #rho=0.33
+#so weighted mean is slightly more well-correlated than unweighted
+
+rand_test(homo_LFC[,c(2,3)], nperm=1e3) #still very significant
+rand_test(homo_weighted[,c(2,3)], nperm=1e3)
+
+#The expression-normalized variance of all genes is also correlated.
+rand_test(homo_Disp[,c(2,3)], nperm=1e3) #and highly sig
+
+##Plotting
+homo_LFC$density <- get_density(homo_LFC$Acutus, homo_LFC$Prop, n = 500)
+homo_weighted$density <- get_density(homo_weighted$Acutus, homo_weighted$Prop, n = 500)
+homo_Disp <- na.omit(homo_Disp)
+homo_Disp$density <- get_density(homo_Disp$Acutus, homo_Disp$Prop, n = 500)
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/LFC_cor_multicopy.png")
+ggplot(homo_LFC, aes(x=Acutus, y=Prop, color=density)) + geom_point() + scale_color_viridis() + geom_smooth(method = "lm", color = "red") + theme_bw() + geom_hline(yintercept =0) + geom_vline(xintercept =0) + labs(title = "LFC, multi-copy", x="C. acutus", y="C. propinquus", color="Density") + theme(text=element_text(size=16), 
+                                                                  legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Dispersion_cor_multicopy.png")
+ggplot(homo_Disp, aes(x=Acutus, y=Prop, color=density)) + geom_point() + scale_color_viridis() + geom_smooth(method = "lm", color = "red") + theme_bw() + geom_hline(yintercept =0) + geom_vline(xintercept =0) + labs(title = "Dispersion, multi-copy", x="C. acutus", y="C. propinquus", color="Density") + theme(text=element_text(size=16), legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/LFC_cor_multi_weight.png")
+ggplot(homo_weighted, aes(x=Acutus, y=Prop, color=density)) + geom_point() + scale_color_viridis() + geom_smooth(method = "lm", color = "red") + theme_bw() + geom_hline(yintercept =0) + geom_vline(xintercept =0) + labs(title = "LFC, multi-copy", x="C. acutus", y="C. propinquus", color="Density") + theme(text=element_text(size=16), 
+                                                                  legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+homo_DE <- homo_LFC[homo_LFC$OG %in% df[DE=="DE"]$OG,] #DE in at least one species
+homo_DE$Cons <- homo_DE$OG %in% df[Starve_conserved=="Yes"]$OG
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/LFC_cor_multicopy_DE.png")
+ggplot(homo_DE %>% arrange(Cons), aes(x=Acutus, y=Prop, color=Cons)) + geom_point(alpha=0.7) + scale_color_manual(values=c("black", "red")) + theme_bw() + geom_hline(yintercept=0) + geom_vline(xintercept =0) + labs(title = "LFC correlation, multi-copy, DE") + xlab("Calanoides") + ylab("Calanus")
+dev.off()
+
+homo_DE <- homo_weighted[homo_weighted$OG %in% df[DE=="DE"]$OG,] #DE in at least one species
+homo_DE$Cons <- homo_DE$OG %in% df[Starve_conserved=="Yes"]$OG
+
+
+cor.test(homo_DE$Acutus, homo_DE$Prop, method="spearman")
+#0.55
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/LFC_cor_multi_weight_DE.png")
+ggplot(homo_DE %>% arrange(Cons), aes(x=Acutus, y=Prop, color=Cons)) + geom_point(alpha=0.7) + scale_color_manual(values=c("black", "red"), labels=c("Species-\nspecific", "CSG")) + theme_bw() + geom_hline(yintercept=0) + geom_vline(xintercept =0) + labs(title = "LFC, multi-copy, DE", x="C. acutus", y="C. propinquus", color=element_blank()) + theme(text=element_text(size=16), legend.title=element_text(size=12),                                                                                          legend.text=element_text(size=10))
+dev.off()
+
+```
+
+
+What we really want to do is identify genes that show the same response to starvation in both species.
+We can do this using an equivalence test (in this case, the 'two-one-sided t-tests' procedure)
+```{r}
+###TOST!
+
+TOST <- function(og){
+  genes = single_copy[OG == og,]
+  
+  ##Start with DE genes
+  DE = which(genes$DE == "DE")
+  
+  if (nrow(genes) < 2){
+    return(NA)
+  }
+  
+  #modifying this to use for all (even non-DE genes)
+  #if neither is DE, skip
+    if (length(DE)==1){
+      reference <- DE
+    } else if (length(DE) %in% c(0,2)){ #if both/neither DE, compare to largest LFC
+      
+      reference <- which.max(abs(genes$logFC))
+    }
+  
+  #Welch-Satterthwaite equation for populations with unequal variances and degrees of freedom..
+  r_num = sum(genes$SE**2)**2
+  r_denom = sum(genes$SE**4 / genes$df) 
+  
+  r = r_num / r_denom
+  
+  t_denom = sqrt(sum(genes$SE**2 / genes$df))
+  mu = abs(diff(genes$logFC))
+  #Critical value is half the distance between the DE/reference gene and zero
+  crit = min(abs(genes[reference,]$logFC / 2))
+  
+  t = (mu - crit) / t_denom
+  p1 = pt(t, df=r, lower.tail = TRUE)
+  t = (mu + crit) / t_denom
+  p2 = pt(t, df=r, lower.tail = FALSE)
+  
+  p <- pmax( p1, p2 )
+  
+  return(p)
+}
+
+
+single_copy = df[Homology == "Single-copy ortholog",] %>% arrange(OG)
+
+#run test on sc genes that are DE in either spp
+single_ogs = unique( single_copy[DE=="DE",]$OG )
+
+tost = sapply(single_ogs, TOST)
+tost.adj = p.adjust(tost, method = "BH")
+length(which(tost.adj <= 0.05))
+#337 OGs 
+toasts = names(tost.adj)[which(tost.adj <= 0.05)]
+
+```
+
+What about sort of a reverse TOST? We can use the inverse of the above equivalency test as a metric of expression divergence beyond a threshold. In this case, whether the difference in LFC is greate than +- 50%.
+
+```{r}
+
+#so try TOST on all genes w/ expression value in both species: 
+
+T_diff <- function(og){
+  genes = single_copy[OG == og,]
+  
+  ##Start with DE genes
+  DE = which(genes$DE == "DE")
+  
+  if (nrow(genes) < 2){
+    return(NA)
+  }
+  
+  #if neither is DE, skip
+    if (length(DE)==1){
+      reference <- DE
+    } else if (length(DE) %in% c(0,2)){ #if both/neither DE, compare to largest LFC
+      
+      reference <- which.max(abs(genes$logFC))
+    }
+  
+  
+  #Welch-Satterthwaite equation for populations with unequal variances and degrees of freedom..
+  r_num = sum(genes$SE**2)**2
+  r_denom = sum(genes$SE**4 / genes$df) 
+  
+  r = r_num / r_denom
+  
+  t_denom = sqrt(sum(genes$SE**2 / genes$df))
+  mu = abs(diff(genes$logFC))
+  
+  #Critical value is half the distance between the DE/reference gene and zero
+  crit = min(abs(genes[reference,]$logFC / 2))
+  
+  #so here we just use a good ol' t-test, essentially testing whether the difference in   LFC is GREATER than the critical value
+  
+  t = (mu - crit) / t_denom
+  p = pt(t, df=r, lower.tail = FALSE)
+  
+  return(p)
+}
+
+
+#first, just for DE in either..
+diff = sapply(single_ogs, T_diff)
+diff.adj = p.adjust(diff, method = "BH")
+length(which(diff.adj <= 0.05))
+#345 OGs 
+diffs = names(diff.adj)[which(diff.adj <= 0.05)]
+
+
+all_single = unique(df[Homology=="Single-copy ortholog"]$OG) 
+tmp_ac <- df[OG %in% all_single & Species=="Acutus" & !is.na(logFC)]$OG
+tmp_pr <- df[OG %in% all_single & Species=="Prop" & !is.na(logFC)]$OG
+all_single = tmp_pr[tmp_pr %in% tmp_ac] #6427
+All_tost = sapply(all_single, TOST)
+All_diff = sapply(all_single, T_diff)
+
+#sign and log the p-values for GO
+Same_GO <- -log10(All_tost) #here, large values are genes that are more similar to each other
+Diff_GO <- -log10(All_diff) #here, large values are genes that are more different
+
+species_vect <- sapply(all_single, function(og){ #TRUE if Acutus has lower LFC
+  df[OG==og & Species=="Acutus"]$logFC < df[OG==og & Species=="Prop"]$logFC
+})
+
+Diff_GO[species_vect] <- -Diff_GO[species_vect]#so negative values are higher in Propinquus
+
+write.csv(Same_GO, file="F:/Antarctic_copepods/starve/Same_single_GO.csv", quote=F, row.names = T)
+
+write.csv(Diff_GO, file="F:/Antarctic_copepods/starve/Diff_single_GO.csv", quote=F, row.names = T)
+
+
+```
+
+Multi-copy gene families
+```{r}
+library(Hmisc)
+
+#subset OG's with homologs EXPRESSED in both species, and at least one DE gene
+DE_ogs = df[DE=="DE"]$OG
+
+multi_copy = df[Homology=="Homolog" & OG %in% DE_ogs,]
+multi_copy = multi_copy %>% group_by(OG) %>% filter(!if_any(logFC, ~is.na(.))) %>% ungroup()
+length(unique(multi_copy$OG))
+#2407
+
+######Another, perhaps more appropriate mean approach is to explicitly test whether the mean LFC of Orthogroups are equivalent, pooling all gene/transcript variance
+
+TOST_Mean_pool <- function(og){
+  genes = df[OG == og,]
+  
+  Ac_genes <- genes[Species=="Acutus" & !is.na(logFC)]
+  Prop_genes <- genes[Species=="Prop" & !is.na(logFC)]
+  
+  if (nrow(Ac_genes) < 1 | nrow(Prop_genes) < 1){
+    return(NA)
+  }
+  
+  #means weighted by inverse variance
+  Ac_mean <- weighted.mean(Ac_genes$logFC, 1/(Ac_genes$SE**2), na.rm=T)
+  Prop_mean <- weighted.mean(Prop_genes$logFC, 1/(Prop_genes$SE**2), na.rm=T)
+  
+  #Just checking my math here/making sure these functions act as expected
+  #calculate variance of the weighted sample. # these 2 lines are equivalent, and give the BIASED variance estimator
+  v1 <- weighted.mean( (Prop_genes$logFC - Prop_mean)**2, 1/(Prop_genes$SE**2), na.rm=T ) 
+  #v <- sum( ( 1/(Prop_genes$SE**2) )*(Prop_genes$logFC-Prop_mean)**2) / sum( 1/(Prop_genes$SE**2) )
+  
+  capital_V1 = sum(1/(Prop_genes$SE**2) )
+  capital_V2 = sum(1/(Prop_genes$SE**4) ) 
+  
+  #this line unbiases. it should give the same results as the following:
+  v1 / (1 - (capital_V2/(capital_V1**2))) 
+  
+  #use normwt=T because these are reliability weights 
+  if (nrow(Ac_genes)==1){
+    Ac_var = Ac_genes$SE**2
+  } else { Ac_var <- wtd.var(x = Ac_genes$logFC, weights = 1/(Ac_genes$SE**2), normwt=TRUE) }
+  
+  if (nrow(Prop_genes)==1){
+    Prop_var = Prop_genes$SE**2
+  } else { Prop_var <- wtd.var(x = Prop_genes$logFC, weights = 1/(Prop_genes$SE**2), normwt=TRUE) }
+  
+  #if both/neither contain DE, choose the largest mean LFC (1 is Ac, 2 is prop)
+ if ("DE" %in% Ac_genes$DE & "DE" %in% Prop_genes$DE){
+    reference = which.max( abs(c(Ac_mean, Prop_mean)) )
+  } else if ("DE" %in% Ac_genes$DE) {
+      reference = 1 
+  } else if ("DE" %in% Prop_genes$DE) {
+      reference = 2
+  } else  {reference = which.max( abs(c(Ac_mean, Prop_mean)) )
+  }
+
+  
+ # unweighted:
+  #since the df and sample sizes are equal for each gene, we can estimate a pooled variance by just averaging.
+  #with more "subsamples" or genes, we do end up with more degrees of freedom. The following function returns the pooled (mean)
+  #variance as well as effective pooled df
+ # Ac_var = mean(Ac_genes$SE**2)
+ # Prop_var = mean(Prop_genes$SE**2)
+  
+  #I think, in principle, there would be more degrees of freedom if we average over multiple genes/transcripts. Hoover, idk how to do that
+  #mathematically, so I'll take the more conservative approach of just using the limma df for each species and the pooled Welch-Satterwaithe df as before
+
+    Ac_df <- Ac_genes$df[1]
+    Prop_df <- Prop_genes$df[1]
+     
+ #now we go ahead and use the pooled estimates 
+  
+   r_num = sum(Ac_var, Prop_var)**2
+   r_denom = sum( ( Ac_var**2) / Ac_df, (Prop_var**2)/Prop_df)
+  
+   r = r_num / r_denom
+     
+   t_denom = sqrt( (Ac_var / Ac_df) + (Prop_var/Prop_df))
+   mu = abs( Ac_mean - Prop_mean)
+   
+   ref_LFC = c(Ac_mean, Prop_mean)[reference]
+   crit = abs(ref_LFC / 2)
+      
+   t = (mu - crit) / t_denom
+   p1 = pt(t, df=r, lower.tail = TRUE)
+   t = (mu + crit) / t_denom
+   p2 = pt(t, df=r, lower.tail = FALSE)
+  
+   p <- pmax( p1, p2 )
+   
+   return(p)
+}
+
+
+pooled_OG_equivalence = sapply(unique(multi_copy$OG), TOST_Mean_pool)
+names(pooled_OG_equivalence) <- unique(multi_copy$OG)
+p_pool = p.adjust(unlist(pooled_OG_equivalence), method="BH")
+
+length(which(p_pool < 0.05))
+#here, 223 
+
+pool_sig <- names(na.omit(p_pool[p_pool < 0.05]))
+nrow( df[OG %in% pool_sig,] ) #1232 individual genes
+
+OG_means = df[OG %in% pool_sig,] %>% group_by(OG, Species) %>% dplyr::summarize(weighted.mean(logFC, 1/(SE**2), na.rm=T))
+length(which(OG_means[,3] > 0))
+ 
+pool_up <- unique(OG_means[OG_means[,3] > 0,]$OG)
+pool_down <- unique(OG_means[OG_means[,3] < 0,]$OG)
+
+
+#Okay, so do the Same/Diff stuff from above.
+Diff_Mean_pool <- function(og){
+  genes = df[OG == og,]
+  
+  Ac_genes <- genes[Species=="Acutus" & !is.na(logFC)]
+  Prop_genes <- genes[Species=="Prop" & !is.na(logFC)]
+  
+  if (nrow(Ac_genes) < 1 | nrow(Prop_genes) < 1){
+    return(NA)
+  }
+  
+  #means weighted by inverse variance
+  Ac_mean <- weighted.mean(Ac_genes$logFC, 1/(Ac_genes$SE**2), na.rm=T)
+  Prop_mean <- weighted.mean(Prop_genes$logFC, 1/(Prop_genes$SE**2), na.rm=T)
+  
+  #Just checking my math here/making sure these functions act as expected
+  #calculate variance of the weighted sample. # these 2 lines are equivalent, and give the BIASED variance estimator
+  v1 <- weighted.mean( (Prop_genes$logFC - Prop_mean)**2, 1/(Prop_genes$SE**2), na.rm=T ) 
+  #v <- sum( ( 1/(Prop_genes$SE**2) )*(Prop_genes$logFC-Prop_mean)**2) / sum( 1/(Prop_genes$SE**2) )
+  
+  capital_V1 = sum(1/(Prop_genes$SE**2))
+  capital_V2 = sum(1/(Prop_genes$SE**4)) 
+  
+  #this line unbiases. it should give the same results as the following:
+  #v1 / (1 - (capital_V2/(capital_V1**2))) 
+  
+  #use normwt=T because these are reliability weights 
+  if (nrow(Ac_genes)==1){
+    Ac_var <- Ac_genes$SE**2
+  } else { Ac_var <- wtd.var(x = Ac_genes$logFC, weights = 1/(Ac_genes$SE**2), normwt=TRUE) }
+  
+  if (nrow(Prop_genes)==1){
+    Prop_var = Prop_genes$SE**2
+  } else { Prop_var <- wtd.var(x = Prop_genes$logFC, weights = 1/(Prop_genes$SE**2), normwt=TRUE) }
+  
+  #if both/neither contain DE, choose the largest mean LFC (1 is Ac, 2 is prop)
+  if ("DE" %in% Ac_genes$DE & "DE" %in% Prop_genes$DE){
+    reference = which.max( abs(c(Ac_mean, Prop_mean)) )
+  } else if ("DE" %in% Ac_genes$DE) {
+      reference = 1 
+  } else if ("DE" %in% Prop_genes$DE) {
+      reference = 2
+  } else  {reference = which.max( abs(c(Ac_mean, Prop_mean)) )
+  }
+  
+     Ac_df <- Ac_genes$df[1]
+    Prop_df <- Prop_genes$df[1]
+  
+   #now we go ahead and use the pooled estimates 
+  
+   r_num = sum(Ac_var, Prop_var)**2
+   r_denom = sum( ( Ac_var**2) / Ac_df, (Prop_var**2)/Prop_df)
+  
+   r = r_num / r_denom
+     
+   t_denom = sqrt( (Ac_var / Ac_df) + (Prop_var/Prop_df))
+   mu = abs( Ac_mean - Prop_mean)
+  
+  ref_LFC = c(Ac_mean, Prop_mean)[reference]
+  crit = abs(ref_LFC / 2)
+  
+  #so here we just use a good ol' t-test, testing whether the difference in   LFC is GREATER than the critical value
+  
+  t = (mu - crit) / t_denom
+  p = pt(t, df=r, lower.tail = FALSE)
+  
+  return(p)
+}
+
+
+pooled_OG_difference = sapply(unique(multi_copy$OG), Diff_Mean_pool)
+names(pooled_OG_difference) <- unique(multi_copy$OG)
+p_pool = p.adjust(unlist(pooled_OG_difference), method="BH")
+
+length(which(p_pool < 0.05))
+#507
+pool_sig <- names(na.omit(p_pool[p_pool < 0.05]))
+nrow( df[OG %in% pool_sig,] ) #3514 individual genes
+
+Diff_Acutus <- df[OG %in% c(diffs, pool_sig) & Species=="Acutus",]$Gene
+Diff_Prop <- df[OG %in% c(diffs, pool_sig) & Species=="Prop",]$Gene
+
+
+all_multi = df[Homology=="Homolog"] %>% group_by(OG) %>% filter(!if_any(logFC, ~is.na(.))) %>% ungroup()
+tmp_ac <- unique( all_multi[all_multi$Species=="Acutus",]$OG )
+tmp_pr <- unique( all_multi[all_multi$Species=="Prop",]$OG )
+all_multi = tmp_pr[tmp_pr %in% tmp_ac] #9243
+All_tost = sapply(all_multi, TOST_Mean_pool)
+All_diff = sapply(all_multi, Diff_Mean_pool)
+
+#sign and log the p-values for GO
+Same_GO <- -log10(unlist(All_tost) ) #here, large values are genes that are more similar to each other
+Diff_GO <- -log10(unlist(All_diff)) #here, large values are genes that are more different
+
+species_vect <- sapply(all_multi, function(og){ #TRUE if Acutus has lower mean LFC
+  Ac_mean <- df[OG==og & Species=="Acutus"] %>% dplyr::summarize(weighted.mean(logFC, 1/(SE**2), na.rm=T))
+  Pr_mean <- df[OG==og & Species=="Prop"] %>% dplyr::summarize(weighted.mean(logFC, 1/(SE**2), na.rm=T))
+  return(Ac_mean < Pr_mean)
+})
+
+Diff_GO[species_vect] <- -Diff_GO[species_vect]#so negative values are higher in Propinquus
+
+write.csv(Same_GO, file="F:/Antarctic_copepods/starve/Same_multi_GO.csv", quote=F, row.names = T)
+
+write.csv(Diff_GO, file="F:/Antarctic_copepods/starve/Diff_multi_GO.csv", quote=F, row.names = T) 
+
+```
+
+ 
+```{r}
+
+##write output for all "conserved" genes
+df$Starve_conserved = "No"
+df[OG %in% toasts,]$Starve_conserved = "Yes"
+df[OG %in% pool_sig,]$Starve_conserved = "Yes"
+
+write.csv(df, quote=F, row.names = F, file="df_060322.csv")
+
+
+```
+
+I should look at the "variance" of LFC among paralogs in multi-copy OG's.
+```{r}
+
+ggplot(df[Homology=="Homolog" & Starve_conserved=="Yes"], aes(y=logFC, x=OG)) + geom_point() + theme_classic() + geom_hline(aes(yintercept=0))
+
+ma = df %>% filter(Homology=="Homolog", Starve_conserved=="Yes") %>% group_by(OG) %>% dplyr::summarize(sd(logFC, na.rm=T))
+
+hist(ma$`sd(logFC, na.rm = T)`)
+summary(ma$`sd(logFC, na.rm = T)`)
+
+ma = df %>% filter(Homology=="Homolog", Starve_conserved=="No") %>% group_by(OG) %>%dplyr::summarize(sd(logFC, na.rm=T))
+
+hist(ma$`sd(logFC, na.rm = T)`)
+summary(ma$`sd(logFC, na.rm = T)`)
+#unsurprisingly, Cons genes have less within-OG variance than other OG's
+
+#well, one way of thinking about this is whether there are any individual paralogs that were expressed in the opposite direction from the mean LFC.
+
+df %>% filter(Homology=="Homolog", Starve_conserved=="Yes") %>% group_by(OG) %>%  dplyr::summarize(OG_mean = weighted.mean(logFC, 1/(SE**2), na.rm=T))
+
+ggplot(df[Homology=="Homolog" & Starve_conserved=="Yes"], aes(x=OG, y=sign(logFC), color=sign(logFC))) + geom_col(position="stack") + theme_bw()
+
+test <- df %>% filter(Homology=="Homolog", Starve_conserved=="Yes") %>% dplyr::select(OG, logFC, SE)
+
+test$OG_mean <- sapply(test$OG, function(og){ return( weighted.mean(test[OG==og]$logFC, 1/(test[OG==og]$SE**2), na.rm=T))})
+
+different_sign <- test %>% filter(sign(logFC) != sign(OG_mean))
+
+length(unique(different_sign$OG))
+#19 OG's, 25 genes
+
+##okay, so basically we'd like to identify genes that are doing something "different" from the mean of the OG, which I will say is the opposite sign of the weighted mean. But most of these are small and their confidence intervals overlap with the weighted mean... so.
+
+#Let's just say that a gene is different, within its OG, if its LFC does not overlap with the weighted mean (95\% CI). 
+
+#we do want a one-tailed test, where if OG_mean is positive we test whether a gene's LFC is lower, and vice versa. To ease this, we can flip some of the signs: 
+
+different_sign$Z <- (different_sign$logFC - different_sign$OG_mean) / different_sign$SE
+different_sign[OG_mean < 0]$Z <- -different_sign[OG_mean < 0]$Z
+different_sign$p = pnorm(different_sign$Z, mean = 0, sd = 1, lower.tail = TRUE)
+
+View(different_sign)
+
+#only 7 genes' LFC significantly differed from the weighted mean (test, unadjusted p <0.05) in the opposite direction, and none of these genes were themselves differential expressed. 4/7 were in one OG: N20.HOG0013298. 
+
+#So in general there is not widespread within-OG variance... most genes really do have similar LFC within these "conserved" OG's 
+
+#For plotting:
+test$Z <- (test$logFC - test$OG_mean) / test$SE
+test[OG_mean < 0]$Z <- -test[OG_mean < 0]$Z
+test$p = pnorm(test$Z, mean = 0, sd = 1, lower.tail = TRUE)
+
+
+
+
+p <- ggplot(df[OG %in% toasts,] %>% mutate(OG = fct_reorder(OG, logFC)), aes(y=logFC, x=OG, color=Species)) 
+p <- p + geom_point(size=1.2) + theme_classic() + geom_errorbar(aes(ymax = CI.R, ymin = CI.L), alpha=0.25, width=0.2, size=0.8)
+p + geom_hline(yintercept = 0) + theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+png(res=300, file="F:/Antarctic_copepods/starve/figs/Multicopy_consistency.png", width=6, height=4, units = 'in')
+p <- ggplot(test %>% mutate(OG = fct_reorder(OG, OG_mean)), aes(y=OG, x=OG_mean)) + geom_point(size=2) + theme_classic() + theme( axis.text.y=element_blank(), axis.ticks.y=element_blank()) + geom_vline(xintercept = 0) + geom_point(aes(y=OG, x=logFC, color=p>0.05 | sign(logFC) == sign(OG_mean)), alpha=0.7) + xlab("LFC") + labs(color = "Overlaps mean?")
+p
+dev.off()
+
+
+```
+
+Look at lipid, protein, stress genes
+```{r}
+
+#contains each Orthogroup's "difference" between species, which is the signed log10 p-value of from the T_diff and Diff_Mean_pool. Negative values have higher LFC in C. propinquus.
+
+All_diff <- read.csv("Diff_All_GO.csv") #includes single- and multi-copy genes
+names(All_diff) <- c("OG", "Difference")
+
+Lipid_genes <- read.csv("F:/Antarctic_copepods/starve/lipid_genes.txt")$x
+Protein_genes <- read.csv("F:/Antarctic_copepods/starve/protein_genes.txt")$x
+Stress_genes <- read.csv("F:/Antarctic_copepods/starve/stress_genes.txt")$x
+Repro_genes <- read.csv("F:/Antarctic_copepods/starve/repro_genes.txt")$x
+
+DE_df <- df %>% filter(DE=="DE")
+
+fisher.test(DE_df$Starve_conserved, DE_df$Gene %in% Lipid_genes)
+#odds ratio = 0.660; p=0.06
+table(DE_df$Starve_conserved, DE_df$Gene %in% Lipid_genes)
+
+fisher.test(DE_df$Starve_conserved, DE_df$Gene %in% Protein_genes)
+#odds ratio = 1.88; p=4e-10
+table(DE_df$Starve_conserved, DE_df$Gene %in% Protein_genes)
+#among DE genes, protein-related genes were much more likely to be conserved
+
+fisher.test(DE_df$Starve_conserved, DE_df$Gene %in% Stress_genes)
+#odds ratio = 1.49; p=0.0012
+table(DE_df$Starve_conserved, DE_df$Gene %in% Stress_genes)
+
+fisher.test(DE_df$Starve_conserved, DE_df$Gene %in% Repro_genes)
+#odds ratio = 0.97; p=0.93
+table(DE_df$Starve_conserved, DE_df$Gene %in% Repro_genes)
+
+#note that OG's can be annotated with multiple terms
+Lipids_N20 <- unique( na.omit(df[Gene %in% Lipid_genes]$OG) )
+Protein_N20 <- unique( na.omit(df[Gene %in% Protein_genes]$OG) )
+Stress_N20 <- unique( na.omit(df[Gene %in% Stress_genes]$OG) )
+Repro_N20 <- unique( na.omit(df[Gene %in% Repro_genes]$OG) )
+
+All_diff <- data.table( data.frame(All_diff, lipid = All_diff$OG %in% Lipids_N20,
+                   stress = All_diff$OG %in% Stress_N20,
+                   protein = All_diff$OG %in% Protein_N20,
+                   repro = All_diff$OG %in% Repro_N20
+                   ) ) %>% mutate(Difference = abs(Difference))
+
+p1 <- wilcox.test(Difference ~ lipid, 
+                  data=All_diff)$p.value
+p2 <- wilcox.test(Difference ~ protein, 
+                  data=All_diff)$p.value
+p3 <- wilcox.test(Difference ~ stress, 
+                  data=All_diff)$p.value
+p4 <- wilcox.test(All_diff[lipid==T]$Difference, 
+                  All_diff[protein==T]$Difference)$p.value
+p5 <- wilcox.test(All_diff[lipid==T]$Difference, 
+                  All_diff[stress==T]$Difference)$p.value
+p6 <- wilcox.test(All_diff[protein==T]$Difference, 
+                  All_diff[stress==T]$Difference)$p.value
+
+p.adjust(c(p1,p2,p3,p4,p5,p6), method="BH") 
+#p1, p2, p4, p5, & p6 < 0.05
+
+All_diff %>% group_by(lipid) %>%
+  dplyr::summarize(median(Difference), mean(Difference))
+All_diff %>% group_by(protein) %>% 
+  dplyr::summarize(median(Difference), mean(Difference))
+All_diff %>% group_by(stress) %>% 
+  dplyr::summarize(median(Difference), mean(Difference))
+
+ggplot(All_diff, aes(x=Difference, fill=lipid)) + geom_density(alpha=0.5) 
+
+#lipids are more different (1.3 vs 0.9), proteins are more similar (0.75 vs 0.9), and
+#stress have no difference (~0.9). 
+
+
+```
+
+
+Need to clean up this chunk:
+```{r}
+setwd("F:/Antarctic_copepods/starve/codeml/single_copy_dNdS/")
+
+####dN/dS of single_copy genes
+codeml = read.table("codeml_LRTs.txt")
+#omega1 and omega2 come from 2 different starting values (0.5 and 2)
+names(codeml) = c("OG", "LRT", "omega1", "omega2", "dN", "dS")
+
+summary(codeml$omega1 == codeml$omega2)
+summary(codeml$omega1 - codeml$omega2 <= 0.01)
+#dN/dS estimates exactly equal for 9026 genes, within +- 0.01 for 9081
+
+conv = codeml[abs(codeml$omega1 - codeml$omega2) <= 0.01,]
+
+ggplot(conv, aes(y = dN, x = dS)) + geom_point(alpha=0.2) + theme_bw() 
+
+length(which(conv$omega1 == 99))
+length(which(conv$dS > 3))
+
+#excluding sites with dS > 3 w==99: 
+conv = conv[conv$dS < 3 & conv$omega1 != 99,] #6954
+conv$p <- pchisq(conv$LRT, df=1, lower.tail=FALSE)
+conv$padj = p.adjust(conv$p, method="BH")
+
+positive = conv[conv$omega1 > 1 & conv$padj < 0.01,]
+negative = conv[conv$omega1 < 1 & conv$padj < 0.01,]
+neutral = conv[conv$padj > 0.01,]
+
+#5936 ortholog pairs with expression data.
+
+omega = join(df, conv, type="right", by="OG") %>% dplyr::select(-LRT, -omega2, -p, -df, -Homology, -Coding)
+omega <- data.table(omega)
+
+ggplot(omega, aes(y=log(omega1), x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "loess", color = "red", degree=1, se=FALSE) + theme_bw() + facet_grid(.~Species) #obviously genes with higher expression have low omega
+
+omega$Group <- omega$DE
+omega[Gene %in% df[Starve_conserved=="Yes"]$Gene]$Group <- "Cons"
+
+dunnTest(log(omega1) ~ Group, data=omega[Species=="Acutus"]); omega %>% group_by(Group, Species) %>% dplyr::summarize(median(log(omega1)))
+dunnTest(log(omega1) ~ Group, data=omega[Species=="Prop"])
+
+loess_Acutus = loess(log(omega1) ~ AveExpr, data = omega[Species=="Acutus",], degree=1, na.action = na.omit)
+loess_Prop = loess(log(omega1) ~ AveExpr, data = omega[Species=="Prop",], degree=1, na.action = na.omit)
+
+omega$W_regressed <- omega$omega1
+names(loess_Acutus$residuals) = omega[Species=="Acutus" & (!is.na(logFC)),]$Gene
+omega[Species=="Acutus",]$W_regressed =  loess_Acutus$residuals[omega[Species=="Acutus",]$Gene]
+names(loess_Prop$residuals) = omega[Species=="Prop" & (!is.na(logFC)),]$Gene
+omega[Species=="Prop",]$W_regressed = loess_Prop$residuals[omega[Species=="Prop",]$Gene]
+
+#sanity check
+ggplot(omega, aes(y=W_regressed, x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "lm", color = "red") + theme_bw() + facet_grid(.~Species)
+
+dunnTest(W_regressed ~ Group, data=omega[Species=="Acutus"]); omega %>% group_by(Group, Species) %>% dplyr::summarize(median(W_regressed, na.rm=T))
+dunnTest(W_regressed ~ Group, data=omega[Species=="Prop"])
+
+ggplot(omega, aes(x=Group, y=log(omega1), fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species)
+
+ggplot(omega, aes(x=Group, y=W_regressed, fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species) #effect goes away
+
+
+lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Acutus",], na.action = na.omit, weights = 1/SE**2)
+summary(lfc) #positive, p=0.005
+lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Prop",], na.action = na.omit, weights = 1/SE**2)
+summary(lfc)#positive, p=0.05
+#genes with high omega tend to have larger LFC (and probably also more variable expression in general...)
+
+###
+
+omega <- join(omega, All_diff, by="OG", type="left")
+
+ggplot(omega, aes(x=log(omega1), y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
+ggplot(omega, aes(x=W_regressed, y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
+cor.test(log(omega$omega1), abs(omega$Difference), method="spearman")
+cor.test(omega$W_regressed, abs(omega$Difference), method="spearman")
+
+cor.test(log(omega$omega1), abs(omega$Dispersion), method="spearman")
+cor.test(omega$W_regressed, abs(omega$Dispersion), method="spearman")
+```
+Let's use dispersion calculated with just field samples.
+```{r}
+
+df$Group = "Non-DE"
+df[DE=="DE"]$Group = "DE" #species-specific
+df[Starve_conserved=="Yes"]$Group = "Cons"
+
+df[Species=="Acutus" & !is.na(Dispersion)] %>% group_by(Group) %>% summarize(mean(Dispersion), median(Dispersion))
+ggplot(df[Species=="Acutus"], aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
+#The pattern is now much stronger.. DE genes have lower Dispersion,and Cons much lower still
+#You can see it's bimodal - there is a set of really low-dispersion genes enriched among Cons and DE genes
+
+dunnTest(Dispersion ~ Group, data=df[Species=="Prop"]); df[Species=="Prop" & !is.na(Dispersion)] %>% group_by(Group) %>% summarize(mean(Dispersion), median(Dispersion))
+ggplot(df[Species=="Prop"], aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)])
+#Similar pattern for Propinquus
+
+res <- glm(Dispersion ~ Group, data=df[Species=="Acutus"], weights=1/Dispersion_SE**2, family=gaussian(link='identity')) # aka regular lm
+summary(res)
+test <- emmeans(res, "Group")
+pairs(test)
+
+res <- glm(Dispersion ~ Group, data=df[Species=="Prop"], weights=1/Dispersion_SE**2, family=gaussian(link='identity'))
+summary(res)
+test <- emmeans(res, "Group")
+pairs(test)
+
+#so we've already shown that dispersion is well-correlated across species. Does it differ between Conserved and other genes? 
+single_Disp = single_copy %>% dplyr::select(OG, Dispersion, Species) %>% tidyr::spread(Species, Dispersion)
+single_Disp <- data.table( na.omit(single_Disp) %>% mutate(Diff = Acutus - Prop) )
+#negative values are less dispersed in Acutus
+
+#let's look at DE vs. Conserved genes, whether they have more similar variance between species
+DE <- unique(df[DE=="DE",]$OG)
+Cons <- unique(df[Starve_conserved=="Yes",]$OG)
+
+single_Disp$Group = "Non-DE"
+single_Disp[OG %in% DE]$Group = "DE" #species-specific 
+single_Disp[OG %in% Cons]$Group = "Cons" #(these are mutually exclusive)
+
+tmp <- single_copy %>% dplyr::select(OG, Dispersion_SE, Species) %>% tidyr::spread(Species, Dispersion_SE)
+tmp <- data.table( na.omit(tmp))
+
+single_Disp %>% group_by(Group) %>% dplyr::summarize(mean(abs(Diff)), median(abs(Diff)))
+
+#assumes equal df, etc. which I think is fair in this case
+single_Disp$Diff_SE <- sqrt(tmp$Acutus**2 + tmp$Prop**2)
+
+dunnTest(Diff ~ Group, data=single_Disp); single_Disp %>% group_by(Group) %>% summarize(mean(Diff), median(Diff))
+dunnTest(abs(Diff) ~ Group, data=single_Disp); single_Disp %>% group_by(Group) %>% summarize(mean(abs(Diff)), median(abs(Diff)))
+
+res <- lm(abs(Diff) ~ Group, data=single_Disp) #unweighted
+pairs(emmeans(res, "Group"))
+res1 <- lm(abs(Diff) ~ Group, data=single_Disp, weights=1/Diff_SE**2) #weighted
+pairs(emmeans(res1, "Group")) #similar results. 
+
+ggplot(single_Disp, aes(x=Diff,fill=Group, y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)])
+ggplot(single_Disp, aes(x=abs(Diff),fill=Group, y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)])
+#DE genes (species-specific) are MORE DIFFERENT between species, Cons are less.
+#looking at the directional, DE genes tend to have lower dispersion in Acutus, and Cons a little bit lower still. 
+
+homologs <- df[Homology == "Homolog",] %>% dplyr::select(OG, Gene, Species, Dispersion, Dispersion_SE, Group) %>% filter(!is.na(Dispersion))
+
+homologs <- homologs %>% group_by(OG) %>% filter(any(Species=="Acutus") & any(Species=="Prop"))
+
+homologs <- homologs %>% group_by(OG, Species) %>% dplyr::mutate(Weighted_Disp = weighted.mean(Dispersion, (1/Dispersion_SE**2), na.rm=T))
+
+homo_Disp = homologs %>% dplyr::select(OG, Weighted_Disp, Species) %>% distinct %>% tidyr::spread(Species, Weighted_Disp)
+
+homo_Disp <- data.table( na.omit(homo_Disp) %>% mutate(Diff = Acutus - Prop) )
+
+homo_Disp$Group = "Non-DE"
+homo_Disp[OG %in% DE]$Group = "DE" #species-specific 
+homo_Disp[OG %in% Cons]$Group = "Cons" #(these are mutually exclusive)
+
+homo_Disp %>% group_by(Group) %>% dplyr::summarize(mean(abs(Diff)), median(abs(Diff)))
+
+tmp <- homologs %>% dplyr::select(OG, Dispersion, Dispersion_SE, Species) %>% mutate(OG_var = wtd.var(x=Dispersion, weights=1/(Dispersion_SE**2), normwt=TRUE))
+tmp[is.na(tmp$OG_var),]$OG_var <- tmp[is.na(tmp$OG_var),]$Dispersion_SE**2
+
+tmp <- tmp %>% dplyr::select(OG, Species, OG_var) %>% distinct() %>% tidyr::spread(Species, OG_var)
+  
+dunnTest(Diff ~ Group, data=homo_Disp); homo_Disp %>% group_by(Group) %>% summarize(mean(Diff), median(Diff))
+dunnTest(abs(Diff) ~ Group, data=homo_Disp); homo_Disp %>% group_by(Group) %>% summarize(mean(abs(Diff)), median(abs(Diff)))
+
+#assumes equal df, etc. which I think is fair in this case
+homo_Disp$Diff_SE <- sqrt(tmp$Acutus + tmp$Prop)
+homo_Disp <- data.table(homo_Disp)
+
+dunnTest(Diff ~ Group, data=homo_Disp); single_Disp %>% group_by(Group) %>% summarize(mean(Diff), median(Diff))
+dunnTest(abs(Diff) ~ Group, data=homo_Disp); homo_Disp %>% group_by(Group) %>% dplyr::summarize(mean(abs(Diff)), median(abs(Diff)))
+
+res <- lm(abs(Diff) ~ Group, data=homo_Disp) #unweighted
+pairs(emmeans(res, "Group")) #cons vs non-DE, p=0.023
+res1 <- lm(abs(Diff) ~ Group, data=homo_Disp, weights=1/Diff_SE**2) #weighted
+pairs(emmeans(res1, "Group")) #but here, Cons and DE both lower. 
+
+
+
+ggplot(homo_Disp, aes(x=Diff,fill=Group, y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)])
+ggplot(homo_Disp, aes(x=abs(Diff),fill=Group, y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)])
+
+
+png(res=400, width=3, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Disp_Acutus_groups_Field.png")
+ggplot(df[Species=="Acutus"], aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)]) + theme(text=element_text(size=16), strip.background = element_blank(), strip.text = element_blank(), legend.position = "none") + scale_y_discrete(labels=c("CSG", "DE", "non-DE"))
+dev.off()
+
+png(res=400, width=3, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Disp_Prop_groups_Field.png")
+ggplot(df[Species=="Prop"], aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)])
+dev.off()
+
+png(res=400, width=3, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/DispDiff_SingleCopy_Field.png")
+ggplot(single_Disp, aes(x=abs(Diff),fill=Group, y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)]) + xlim(c(0,3)) + theme(text=element_text(size=16), strip.background = element_blank(), strip.text = element_blank(), legend.position = "none") + scale_y_discrete(labels=c("CSG", "DE", "non-DE")) +  xlab("Difference")
+dev.off()
+
+png(res=400, width=3, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/DispDiff_MultiCopy_Field.png")
+ggplot(homo_Disp, aes(x=abs(Diff),fill=Group, y=Group)) + stat_slabinterval() + theme_bw() + scale_fill_manual(values=cols[c(1,3,4)]) + xlim(c(0,3)) + theme(text=element_text(size=16), strip.background = element_blank(), strip.text = element_blank(), legend.position = "none") + scale_y_discrete(labels=c("CSG", "DE", "non-DE")) +  xlab("Difference")
+dev.off()
+
+```
+
+```{r}
+#Look at these Cons-DE genes with a Dispersion < -1.3 (the median, in Acutus)
+
+test <- df %>% filter(Species=="Acutus",  Dispersion < -1.3)
+table(test$Group)
+
+ggplot(test, aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
+
+tmp <- test %>% filter(Group=="Cons")
+summary(tmp$AveExpr) #so these genes have quite high expression...
+summary(tmp$SD) #and obviously, low variance 
+
+ggplot(test, aes(x=kTotal,fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
+ggplot(test, aes(x=AveExpr,fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
+ggplot(test, aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
+
+ggplot(omega_df[Gene %in% test$Gene], aes(x=log10(W_N0),fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
+```
+The following dN/dS estimates come from paml branch models, where a single omega is fit to whole clades. Obviously this is a much coarser view than branch-level estimates, but it allows for some hypothesis-testing, and also we can look at the selection regime of the same gene in different parts of the tree. 
+
+```{r}
+codeml <- read.csv("Codeml_All_N0.csv")
+OG_key <- read.table("F:/Antarctic_copepods/starve/OG_cheatsheet.txt", header=T)
+codeml$N0 <- codeml$OG
+codeml$OG <- OG_key[match(codeml$N0, OG_key$N0),]$N20
+
+omega = join(df, codeml[!is.na(codeml$OG),], type="left", by="OG") %>% dplyr::select(-df, -Homology, -Coding)
+omega <- data.table(omega)
+#split up between TAG and WE
+omega$Foreground <- omega$WE
+omega[Species=="Prop"]$Foreground <- omega[Species=="Prop"]$TAG
+
+#We know that starvation-response genes are under stronger selection. Does this differ between Foreground and Background?
+#tmp <- omega %>% dplyr::select(Gene, Species, AveExpr, Group, Background, Foreground) %>% pivot_longer(cols = c("Background", "Foreground"), names_to = "lineage")
+
+tmp <- omega %>% filter(!is.na(N0)) %>% dplyr::select(N0, Species, AveExpr, Group, Background, WE, TAG) %>% pivot_longer(cols = c("Background", "WE", "TAG"), names_to = "lineage") %>% filter( (Species=="Acutus" & lineage=="WE") | (Species=="Prop" & lineage=="TAG")                                                                                                                                )
+  
+res <- glm(value ~ Group * lineage, data=tmp, family=Gamma(link='log'))
+summary(res)
+plot(res)
+visreg(res, xvar="lineage", by="Group", data=tmp, method="REML")
+
+#so it looks like all types of genes are under stronger selection in the Foreground... consistent with the general pattern we observe across the transcriptome. But are the SLOPES different? 
+emmip(res, Group ~ lineage)
+contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
+#the slopes are all different. In other words, the differences between starvation-response genes and other genes are LARGER in the Foreground (and between Cons and DE)
+
+#However, we haven't included AveExpr yet. This is not unreasonable, since the data are already averaging over many sequences and we are only making comparisons between Foreground vs. Background (in other words, we make the assumption that mean expression is unchanged between Foreground and Background). But maybe including AveExpr (only measured in two species in the Foreground, of course) would give more meaningful differences between Groups
+
+res <- glm(value ~ AveExpr + Group*lineage, data=tmp, family=Gamma(link='log'))
+summary(res)
+plot(res)
+visreg(res, xvar="lineage", by="Group", data=tmp, method="REML")
+
+#so now it's a little different, in that there is no difference between Groups IN THE BACKGROUND
+emmip(res, Group ~ lineage)
+contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
+#Slopes are all still different.
+#Is this real? I don't know
+
+
+ggplot(omega, aes(y=log(Foreground), x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "loess", color = "red", degree=1, se=FALSE) + theme_bw() + facet_grid(.~Species) #obviously genes with higher expression have low omega
+
+dunnTest(log(Foreground) ~ Group, data=omega[Species=="Acutus"]); omega %>% 
+  group_by(Group, Species) %>% dplyr::summarize(median(log(Foreground), na.rm=T))
+dunnTest(log(Foreground) ~ Group, data=omega[Species=="Prop"])
+
+
+lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Acutus",], na.action = na.omit, weights = 1/SE**2)
+summary(lfc) #positive, p=0.09
+lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Prop",], na.action = na.omit, weights = 1/SE**2)
+summary(lfc)#positive, p=0.0007
+#genes with high omega tend to have larger LFC (and probably also more variable expression in general...)
+
+###
+
+omega <- join(omega, All_diff, by="OG", type="left")
+
+ggplot(omega, aes(x=log(Foreground), y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
+ggplot(omega, aes(x=W_regressed, y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
+cor.test(log(omega$Foreground), abs(omega$Difference), method="spearman")
+cor.test(omega$W_regressed, abs(omega$Difference), method="spearman")
+
+cor.test(log(omega$Foreground), abs(omega$Dispersion), method="spearman")
+cor.test(omega$W_regressed, abs(omega$Dispersion), method="spearman")
+
+
+```
+
+#Check with N1
+```{r}
+codeml <- read.csv("Codeml_All_N1.csv")
+OG_key <- read.table("F:/Antarctic_copepods/starve/OG_cheatsheet.txt", header=T)
+codeml$N1 <- codeml$OG
+codeml$OG <- OG_key[match(codeml$N1, OG_key$N1),]$N20
+
+omega = join(df, codeml[!is.na(codeml$OG),], type="left", by="OG") %>% dplyr::select(-df, -Homology, -Coding)
+omega <- data.table(omega)
+#split up between TAG and WE
+omega$Foreground <- omega$WE
+omega[Species=="Prop"]$Foreground <- omega[Species=="Prop"]$TAG
+
+ggplot(omega, aes(y=log(Foreground), x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "loess", color = "red", degree=1, se=FALSE) + theme_bw() + facet_grid(.~Species) #obviously genes with higher expression have low omega
+
+omega$Group <- omega$DE
+omega[Gene %in% df[Starve_conserved=="Yes"]$Gene]$Group <- "Cons"
+
+dunnTest(log(Foreground) ~ Group, data=omega[Species=="Acutus"]); omega %>% 
+  group_by(Group, Species) %>% dplyr::summarize(median(log(Foreground), na.rm=T))
+dunnTest(log(Foreground) ~ Group, data=omega[Species=="Prop"])
+
+loess_Acutus = loess(log(Foreground) ~ AveExpr, data = omega[Species=="Acutus",], degree=1, na.action = na.omit)
+loess_Prop = loess(log(Foreground) ~ AveExpr, data = omega[Species=="Prop",], degree=1, na.action = na.omit)
+
+omega$W_regressed <- omega$Foreground
+names(loess_Acutus$residuals) = omega[Species=="Acutus" & (!is.na(Foreground)) & (!is.na(AveExpr)),]$Gene
+omega[Species=="Acutus",]$W_regressed =  loess_Acutus$residuals[omega[Species=="Acutus",]$Gene]
+names(loess_Prop$residuals) = omega[Species=="Prop" & (!is.na(Foreground)) & (!is.na(AveExpr)),]$Gene
+omega[Species=="Prop",]$W_regressed = loess_Prop$residuals[omega[Species=="Prop",]$Gene]
+
+#sanity check
+ggplot(omega, aes(y=W_regressed, x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "lm", color = "red") + theme_bw() + facet_grid(.~Species)
+
+
+ggplot(omega, aes(x=Group, y=log(Foreground), fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species)
+
+ggplot(omega, aes(x=Group, y=W_regressed, fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species) 
+
+###
+
+omega <- join(omega, All_diff, by="OG", type="left")
+
+ggplot(omega, aes(x=log(Foreground), y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
+ggplot(omega, aes(x=W_regressed, y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
+cor.test(log(omega$Foreground), abs(omega$Difference), method="spearman")
+cor.test(omega$W_regressed, abs(omega$Difference), method="spearman")
+
+cor.test(log(omega$Foreground), abs(omega$Dispersion), method="spearman")
+cor.test(omega$W_regressed, abs(omega$Dispersion), method="spearman")
+
+
+```
+
+Fair et al 2020 suggest that highly conserved "essential" genes would have low Dispersion (less variable across individuals). In support, they found that genes with lower dN/dS (coding region conservation) have lower Dispersion in general.
+
+So, do we see the same pattern in our data? 
+
+branch-level dN/dS estimates
+```{r}
+N0 <- read.csv("F:/Antarctic_copepods/tmp/N0_codeml_MG94.csv")
+N1 <- read.csv("F:/Antarctic_copepods/tmp/N1_codeml_MG94.csv")
+#since we're going to be dealing with Omega on a log scale, let's also get an SE for the log values (NOT the same as the logged standard SE)
+N0$logSE <- (log10(N0$UB) - log10(N0$LB)) / 3.92
+N1$logSE <- (log10(N1$UB) - log10(N1$LB)) / 3.92
+
+omega_df <- join(df[,c("Gene", "logFC", "TPM", "Species", "OG", "transcript", "Dispersion", "Group")], 
+                 N0[,c("OG", "transcript", "Omega", "SE", "logSE")], by="transcript")
+names(omega_df)[9] <- "N0"
+names(omega_df)[10] <- "W_N0"
+names(omega_df)[11] <- "SE_N0"
+names(omega_df)[12] <- "logSE_N0"
+
+omega_df <- join(omega_df, 
+                 N1[,c("OG", "transcript", "Omega", "SE", "logSE")], by="transcript") 
+names(omega_df)[13] <- "N1"
+names(omega_df)[14] <- "W_N1"
+names(omega_df)[15] <- "SE_N1"
+names(omega_df)[16] <- "logSE_N1"
+
+omega_df <- omega_df %>% filter(!is.na(N0) | !is.na(N1))
+
+p <- ggplot(omega_df, aes(x=W_N0, y=W_N1)) + geom_point(alpha=0.2) + theme_bw()
+p
+p + scale_x_log10() + scale_y_log10()
+
+#so it's a nice sanity check that these estimates are highly correlated. N0 estimates include more data, but N1 (younger) might be more accurate in terms of orthology inference. Anyway...
+
+cor.test(omega_df$W_N0, abs(omega_df$logFC), use='pairwise.complete.obs', method="spearman") #(rho=0.17)
+cor.test(omega_df$W_N1, abs(omega_df$logFC), use='pairwise.complete.obs', method="spearman") #(rho=0.18)
+
+ggplot(omega_df, aes(x=W_N0, y=abs(logFC))) + geom_point(alpha=0.5) + theme_bw() + geom_smooth(se=F)
+ggplot(omega_df, aes(x=W_N1, y=abs(logFC))) + geom_point(alpha=0.5) + theme_bw() + geom_smooth(se=F)
+
+#We know that starvation-response genes have lower Dispersion than other genes. We might expect genes with low dispersion to also be under strong purifying selection, because these genes would be "essential" and highly conserved (and thus less variable across individuals)
+
+ggplot(omega_df, aes(x=Dispersion, y=log10(W_N0)) ) + geom_point(alpha=0.1) + theme_bw() + facet_grid(.~Species) + ylim(c(-3, 0.5)) + geom_smooth(method='lm', colour='red')
+ggplot(omega_df, aes(x=Dispersion, y=log10(W_N1)) ) + geom_point(alpha=0.1) + theme_bw() + facet_grid(.~Species) + ylim(c(-3, 0.5)) + geom_smooth(method='lm', colour='red')
+
+omega_df$Omega_group <- "Low"
+omega_df[W_N0 %between% c(0.2, 0.8)]$Omega_group <- "Medium"
+omega_df[W_N0 > 0.8]$Omega_group <- "High"
+omega_df$Omega_group <- factor(omega_df$Omega_group, levels=c("Low", "Medium", "High"))
+
+colors <- paletteer_d("MetBrewer::OKeeffe1", direction=-1)
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Disp_OmegaN0_ecdf.png")
+ggplot(omega_df, aes(x=Dispersion, color=Omega_group)) + stat_ecdf(size=1) + theme_bw() + facet_grid(.~Species) + scale_colour_manual(values=colors[c(1,4,9)]) + theme(text=element_text(size=18), strip.background = element_blank(), strip.text = element_blank()) +
+  labs(y="Fraction of data", color="dN/dS")
+dev.off()
+
+omega_df$Omega_group <- "Low"
+omega_df[W_N1 %between% c(0.2, 0.8)]$Omega_group <- "Medium"
+omega_df[W_N1 > 0.8]$Omega_group <- "High"
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/Disp_OmegaN1_ecdf.png")
+ggplot(omega_df, aes(x=Dispersion, color=Omega_group)) + stat_ecdf(size=1) + theme_bw() + facet_grid(.~Species) + scale_colour_manual(values=colors[c(1,4,9)])
+dev.off()
+
+cor(omega_df$W_N0, omega_df$Dispersion, use='pairwise.complete.obs', method="spearman") #0.30
+cor(omega_df$W_N1, omega_df$Dispersion, use='pairwise.complete.obs', method="spearman") #0.31
+
+#So there is a relationship between Dispersion and dN/dS, although it is fairly weak. Consistent with idea that highly-conserved genes are also less variable in terms of their expression
+
+#Anyway, what we really care about is whether Starvation response genes differ in their dN/dS from other genes. In order to address this, we should account for the influence of expression level on dN/dS. If we don't account for expression, it is probably true, but this doesn't tell us anything other than that starvation-response genes are highly expressed
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/OmegaN0.png")
+ggplot(omega_df, aes(y=W_N0, x=Group, fill=Group)) + stat_eye() + theme_bw() + facet_grid(.~Species) + scale_fill_manual(values=cols[c(4,3,1)], labels=c("non-DE", "Species-specific DE", "CSG") ) + scale_y_log10(limits=c(1e-3, 3)) + theme(text=element_text(size=18), strip.background = element_blank(), strip.text = element_blank(), legend.position = "none") +
+  labs(y="dN/dS") + scale_x_discrete(labels=c("non-DE", "DE", "CSG"))
+dev.off()
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/OmegaN1.png")
+ggplot(omega_df, aes(y=W_N1, x=Group, fill=Group)) + stat_eye() + theme_bw() + facet_grid(.~Species) + scale_fill_manual(values=cols[c(4,3,1)]) + scale_y_log10(limits=c(1e-3, 3))
+dev.off()
+
+dunnTest(W_N0 ~ Group, data=omega_df[Species=="Acutus"]); omega_df %>% 
+  group_by(Group, Species) %>% dplyr::summarize(median(log10(W_N0), na.rm=T))
+dunnTest(W_N0 ~ Group, data=omega_df[Species=="Prop"])
+dunnTest(W_N1 ~ Group, data=omega_df[Species=="Acutus"]); omega_df %>% 
+  group_by(Group, Species) %>% dplyr::summarize(median(log10(W_N1), na.rm=T))
+dunnTest(W_N1 ~ Group, data=omega_df[Species=="Prop"])
+
+#indeed
+#One way to account for Expression would be a GLM (rather than, say, first regression Omega against Expr and then testing for differences in the residuals). And the nice thing is, we can propagate uncertainty in our Omega estimates via the (log)SE
+
+library(visreg)
+library(emmeans)
+
+omega_df %>% group_by(Species, Group) %>% summarize(mean(W_N0, na.rm=T), median(W_N0, na.rm=T))
+
+#also, set factor levels for Group
+omega_df$Group <- factor(omega_df$Group, levels=c("Non-DE", "DE", "Cons"))
+
+res = glm(W_N0 ~ TPM + Group, data=omega_df[Species=="Acutus"], weights=1/logSE_N0**2, family=Gamma(link='log'))
+summary(res)
+termplot(res, partial.resid = T, smooth=panel.smooth)
+visreg(res, xvar="TPM", by="Group", data=omega_df[Species=="Acutus"], method="REML")
+#looks pretty good. We can see the negative relationship between AveExpr and Omega, and that differences between groups persist after accounting for this  
+# Does Cons also differ from DE?
+test <- emmeans(res, "Group")
+pairs(test) #yep, p=0.006
+exp(1)**summary(test)$emmean #this is the groupwise Omega estimates... so 0.22 for non-DE, 0.19 for DE, and 0.17 for Cons. 
+
+res = glm(W_N1 ~ TPM + Group, data=omega_df[Species=="Acutus"], weights=1/logSE_N1**2, family=Gamma(link='log'))
+summary(res)
+termplot(res, partial.resid = T, smooth=panel.smooth)
+visreg(res, xvar="AveExpr", by="Group", data=omega_df[Species=="Acutus"], method="REML")
+test <- emmeans(res, "Group")
+pairs(test) 
+
+#What about propinquus?
+
+res = glm(W_N0 ~ TPM + Group, data=omega_df[Species=="Prop"], weights=1/logSE_N0**2, family=Gamma(link='log'))
+summary(res)
+termplot(res, partial.resid = T, smooth=panel.smooth)
+visreg(res, xvar="AveExpr", by="Group", data=omega_df[Species=="Prop"], method="REML")
+test <- emmeans(res, "Group")
+pairs(test) #Here, no difference between DE and Cons
+
+res = glm(W_N1 ~ TPM + Group, data=omega_df[Species=="Prop"], weights=1/logSE_N1**2, family=Gamma(link='log'))
+summary(res)
+termplot(res, partial.resid = T, smooth=panel.smooth)
+visreg(res, xvar="AveExpr", by="Group", data=omega_df[Species=="Prop"], method="REML")
+test <- emmeans(res, "Group")
+pairs(test) #Same here.
+
+#So, in aggregate, dN/dS in Cons genes is always lower than species-specific DE genes, but it's not significant. Of course this is affected by sample size, there are relatively few Cons genes. Regardless, we conclude that starvation-response genes are under stronger purifying selection than expected based on their expression level, but Cons genes are not necessarily under stronger selection in terms of their protein coding sequence
+
+
+```
+
