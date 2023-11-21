@@ -4,10 +4,12 @@ author: "Cory Berger"
 output: html_notebook
 ---
 
-This notebook contains code for comparative analyses of the starvation response in *Calanoides acutus* and *Calanus propinquus*. Code to generate the input files is found separately in the github repo, as are some specific in-depth analyses (codeml output, overdispersion)
+This notebook contains code for comparative analyses of the starvation response in *Calanoides acutus* and *Calanus propinquus*. Code to generate some of the input files is found separately in the github repo
+
+You can simply change the 
 
 #########~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~PART 1
-######## load in data, including Orthology assignments and DE results
+######## load in data, including Orthology assignments and DE results 
 
 ```{r warning=FALSE, message=FALSE}
 library(plyr)
@@ -33,8 +35,9 @@ library(forcats)
 library(data.table)
 library(paletteer)
 library(ggdist)
+library(emmeans)
 
-df <- data.table( read.csv("df_060322_Annotated.csv") )
+df <- data.table( read.csv("../df_060322_Annotated.csv") )  #change this to "df_Ship_060322_Annotated.csv" to use the ship vs. field data instead of starvation expt. 
 
 cols <- paletteer_d("MetBrewer::Johnson")
 
@@ -740,86 +743,6 @@ ggplot(All_diff, aes(x=Difference, fill=lipid)) + geom_density(alpha=0.5)
 ```
 
 
-Need to clean up this chunk:
-```{r}
-setwd("F:/Antarctic_copepods/starve/codeml/single_copy_dNdS/")
-
-####dN/dS of single_copy genes
-codeml = read.table("codeml_LRTs.txt")
-#omega1 and omega2 come from 2 different starting values (0.5 and 2)
-names(codeml) = c("OG", "LRT", "omega1", "omega2", "dN", "dS")
-
-summary(codeml$omega1 == codeml$omega2)
-summary(codeml$omega1 - codeml$omega2 <= 0.01)
-#dN/dS estimates exactly equal for 9026 genes, within +- 0.01 for 9081
-
-conv = codeml[abs(codeml$omega1 - codeml$omega2) <= 0.01,]
-
-ggplot(conv, aes(y = dN, x = dS)) + geom_point(alpha=0.2) + theme_bw() 
-
-length(which(conv$omega1 == 99))
-length(which(conv$dS > 3))
-
-#excluding sites with dS > 3 w==99: 
-conv = conv[conv$dS < 3 & conv$omega1 != 99,] #6954
-conv$p <- pchisq(conv$LRT, df=1, lower.tail=FALSE)
-conv$padj = p.adjust(conv$p, method="BH")
-
-positive = conv[conv$omega1 > 1 & conv$padj < 0.01,]
-negative = conv[conv$omega1 < 1 & conv$padj < 0.01,]
-neutral = conv[conv$padj > 0.01,]
-
-#5936 ortholog pairs with expression data.
-
-omega = join(df, conv, type="right", by="OG") %>% dplyr::select(-LRT, -omega2, -p, -df, -Homology, -Coding)
-omega <- data.table(omega)
-
-ggplot(omega, aes(y=log(omega1), x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "loess", color = "red", degree=1, se=FALSE) + theme_bw() + facet_grid(.~Species) #obviously genes with higher expression have low omega
-
-omega$Group <- omega$DE
-omega[Gene %in% df[Starve_conserved=="Yes"]$Gene]$Group <- "Cons"
-
-dunnTest(log(omega1) ~ Group, data=omega[Species=="Acutus"]); omega %>% group_by(Group, Species) %>% dplyr::summarize(median(log(omega1)))
-dunnTest(log(omega1) ~ Group, data=omega[Species=="Prop"])
-
-loess_Acutus = loess(log(omega1) ~ AveExpr, data = omega[Species=="Acutus",], degree=1, na.action = na.omit)
-loess_Prop = loess(log(omega1) ~ AveExpr, data = omega[Species=="Prop",], degree=1, na.action = na.omit)
-
-omega$W_regressed <- omega$omega1
-names(loess_Acutus$residuals) = omega[Species=="Acutus" & (!is.na(logFC)),]$Gene
-omega[Species=="Acutus",]$W_regressed =  loess_Acutus$residuals[omega[Species=="Acutus",]$Gene]
-names(loess_Prop$residuals) = omega[Species=="Prop" & (!is.na(logFC)),]$Gene
-omega[Species=="Prop",]$W_regressed = loess_Prop$residuals[omega[Species=="Prop",]$Gene]
-
-#sanity check
-ggplot(omega, aes(y=W_regressed, x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "lm", color = "red") + theme_bw() + facet_grid(.~Species)
-
-dunnTest(W_regressed ~ Group, data=omega[Species=="Acutus"]); omega %>% group_by(Group, Species) %>% dplyr::summarize(median(W_regressed, na.rm=T))
-dunnTest(W_regressed ~ Group, data=omega[Species=="Prop"])
-
-ggplot(omega, aes(x=Group, y=log(omega1), fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species)
-
-ggplot(omega, aes(x=Group, y=W_regressed, fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species) #effect goes away
-
-
-lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Acutus",], na.action = na.omit, weights = 1/SE**2)
-summary(lfc) #positive, p=0.005
-lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Prop",], na.action = na.omit, weights = 1/SE**2)
-summary(lfc)#positive, p=0.05
-#genes with high omega tend to have larger LFC (and probably also more variable expression in general...)
-
-###
-
-omega <- join(omega, All_diff, by="OG", type="left")
-
-ggplot(omega, aes(x=log(omega1), y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
-ggplot(omega, aes(x=W_regressed, y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
-cor.test(log(omega$omega1), abs(omega$Difference), method="spearman")
-cor.test(omega$W_regressed, abs(omega$Difference), method="spearman")
-
-cor.test(log(omega$omega1), abs(omega$Dispersion), method="spearman")
-cor.test(omega$W_regressed, abs(omega$Dispersion), method="spearman")
-```
 Let's use dispersion calculated with just field samples.
 ```{r}
 
@@ -958,11 +881,316 @@ ggplot(test, aes(x=Dispersion,fill=Group,y=Group)) + stat_slabinterval() + theme
 
 ggplot(omega_df[Gene %in% test$Gene], aes(x=log10(W_N0),fill=Group,y=Group)) + stat_slabinterval() + theme_bw()+ scale_fill_manual(values=cols[c(1,3,4)])
 ```
-The following dN/dS estimates come from paml branch models, where a single omega is fit to whole clades. Obviously this is a much coarser view than branch-level estimates, but it allows for some hypothesis-testing, and also we can look at the selection regime of the same gene in different parts of the tree. 
 
+The following dN/dS estimates come from paml branch models, where a single omega is fit to whole clade/group. Obviously this is a much coarser view than branch-level estimates, but it allows for some hypothesis-testing, and also we can look at the selection regime of the same gene in different parts of the tree. 
+
+This chunk processes the raw codeml output (see paper for details)
 ```{r}
-codeml <- read.csv("Codeml_All_N0.csv")
+codeml <- data.table( read.csv("codeml_N0.csv") )
+#this file contains the "raw" codeml output, with log likelihoods and omega estimates for the various models. "null2" is the null (1-ratio) model with starting value of w=2, "Null05" is the null model with starting value w=0.5, "ML" models are two-ratio models (W0 being background and W1 being foreground omegas), and "Fix" is the two-ratio model with W1 fixed at 1. 
+
+##
+conv <- codeml[abs(W_Null2 - W_Null05) <= 0.01 & abs(W0_ML2 - W0_ML05) <= 0.01 & abs(W1_ML2 - W1_ML05) <= 0.01, ]
+#8613 / 10,487
+#82% of genes converge (dif't starting values give similar results)
+
+conv$lnL_NULL <- apply(conv[,c(2,3)], 1, FUN=max)
+conv$lnL_ML <- apply(conv[,c(4,5)], 1, FUN=max)
+conv$W_Null <- 0
+conv$W0_ML <- 0
+conv$W1_ML <- 0
+
+#obtain values from the model run with the best likelihood btwn. the 2 starting values
+conv$test <- apply(conv[,c(2,3)],1, FUN=which.max)
+conv[test==1,]$W_Null <- conv[test==1,]$W_Null2
+conv[test==2,]$W_Null <- conv[test==2,]$W_Null05
+conv$test <- apply(conv[,c(4,5)],1, FUN=which.max)
+conv[test==1,]$W0_ML <- conv[test==1,]$W0_ML2
+conv[test==1,]$W1_ML <- conv[test==1,]$W1_ML2
+conv[test==2,]$W0_ML <- conv[test==2,]$W0_ML05
+conv[test==2,]$W1_ML <- conv[test==2,]$W1_ML05
+
+conv <- conv[,-c(2:5,7:12,18)]
+
+#perform likelihood ratio test
+conv$LRT <- -2*(conv$lnL_NULL - conv$lnL_ML)
+conv$LRT[conv$LRT < 0] = 0
+conv$p = pchisq(conv$LRT, df=1, lower.tail=FALSE)
+conv$padj = p.adjust(conv$p, method="BH")
+
 OG_key <- read.table("F:/Antarctic_copepods/starve/OG_cheatsheet.txt", header=T)
+codeml$N0 <- codeml$OG
+codeml$OG <- OG_key[match(codeml$N0, OG_key$N0),]$N20
+
+Two_ratio <- conv[padj < 0.01,]
+One_ratio <- conv[padj >= 0.01,]
+
+Two_ratio$LRT_fix <- -2*(Two_ratio$lnL_Fix - Two_ratio$lnL_ML)
+Two_ratio$p_Fix = pchisq(Two_ratio$LRT_fix, df=1, lower.tail=FALSE)
+Two_ratio$padj_Fix = p.adjust(Two_ratio$p_Fix, method="BH")
+
+neutral <- Two_ratio[padj_Fix >= 0.01,]
+#no genes appear to be evolving neutrally
+
+omega <- Two_ratio[padj_Fix < 0.01,] %>% dplyr::select(OG, W_Null, W0_ML, W1_ML, p, padj)
+
+omega$Diff <- omega$W1_ML - omega$W0_ML
+length(which(omega$Diff < 0))
+#6352 / 6460 (genes with lower omega in foreground)
+
+#ratio of change in dN/dS
+omega$Ratio <- omega$Diff / omega$W0_ML
+
+positive <- omega[Diff>0]
+negative <- omega[Diff<0]
+
+median(negative$Ratio)
+#median reduction of 37%
+median(positive$Ratio)
+#median increase of 29%
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_points.png")
+ggplot(omega, aes(x=W0_ML, y=W1_ML)) + geom_point(alpha=0.5) + theme_bw() + 
+  geom_hline(yintercept = 1) + geom_vline(xintercept = 1) + geom_abline(slope = 1, intercept = 0) 
+dev.off()
+
+write.csv(conv, quote=F, row.names = F, file="conv_codeml.csv")
+write.csv(Two_ratio, quote=F, row.names = F, file="Two_ratio.csv")
+write.csv(One_ratio, quote=F, row.names = F, file="One_ratio.csv")
+
+##TAG (separate omega for TAG/WE species)
+TAG <- read.table("codeml_output_TAG_N0.txt", fill=T)
+names(TAG) = c("OG","lnL_ML2", "lnL_ML05", "lnL_Fix", "W0_ML2", "W1_ML2", "W2_ML2", "W0_ML05", "W1_ML05", "W2_ML05")
+TAG <- data.table(TAG)
+
+TAG <- TAG[OG %in% Two_ratio$OG]
+conv <- TAG[abs(W0_ML2 - W0_ML05) <= 0.01 & abs(W1_ML2 - W1_ML05) <= 0.01 & abs(W2_ML2 - W2_ML05) <= 0.01, ]
+#6243/6374
+
+conv$lnL_ML <- apply(conv[,c(2,3)], 1, FUN=max)
+conv$W0_ML <- 0
+conv$W1_ML <- 0
+conv$W2_ML <- 0
+
+#obtain values from the model run with the best likelihood btwn. the 2 starting values
+conv$test <- apply(conv[,c(2,3)],1, FUN=which.max)
+conv[test==1,]$W0_ML <- conv[test==1,]$W0_ML2
+conv[test==1,]$W1_ML <- conv[test==1,]$W1_ML2
+conv[test==1,]$W2_ML <- conv[test==1,]$W2_ML2
+conv[test==2,]$W0_ML <- conv[test==2,]$W0_ML05
+conv[test==2,]$W1_ML <- conv[test==2,]$W1_ML05
+conv[test==2,]$W2_ML <- conv[test==2,]$W2_ML2
+
+conv <- conv[,-c(2:3,5:10,15)]
+conv$lnL_2ratio <- Two_ratio[match(conv$OG, Two_ratio$OG), ]$lnL_ML
+
+conv$LRT <- -2*(conv$lnL_2ratio - conv$lnL_ML)
+conv$LRT[conv$LRT < 0] = 0
+conv$p = pchisq(conv$LRT, df=1, lower.tail=FALSE)
+conv$padj = p.adjust(conv$p, method="BH")
+
+Three_ratio <- conv[padj < 0.01,]
+#2379 / 6243 3-ratio genes
+
+Three_ratio$LRT_fix <- -2*(Three_ratio$lnL_Fix - Three_ratio$lnL_ML)
+Three_ratio$p_Fix = pchisq(Three_ratio$LRT_fix, df=1, lower.tail=FALSE)
+Three_ratio$padj_Fix = p.adjust(Three_ratio$p_Fix, method="BH")
+
+neutral <- Three_ratio[padj_Fix >= 0.01,]
+##11 p0.01
+
+omega <- Three_ratio[padj_Fix < 0.01,] %>% dplyr::select(OG, W0_ML, W1_ML, W2_ML, p, padj)
+
+omega$Diff <- omega$W2_ML - omega$W1_ML
+length(which(omega$Diff > 0))
+#1857 / 2379 p<0.01
+
+#ratio of change in dN/dS
+omega$Ratio <- omega$Diff / omega$W1_ML
+
+positive <- omega[Diff>0]
+negative <- omega[Diff<0]
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_3ratio_points.png")
+ggplot(omega, aes(x=W1_ML, y=W2_ML)) + geom_point() + theme_bw() + geom_hline(yintercept = 1) + geom_vline(xintercept = 1) + geom_abline(slope = 1, intercept = 0)
+dev.off()
+
+to_plot = melt(omega[,c(2,3,4)])
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_3ratio_Dist.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, colour="black") + theme_bw()
+p + geom_vline(xintercept = median(omega$W0_ML)) + geom_vline(xintercept = median(omega$W1_ML), color=colors[3]) + 
+  geom_vline(xintercept = median(omega$W2_ML), color=colors[4]) + scale_fill_manual(values=colors[c(1,3,4)])
+dev.off()
+
+### For the next sections, let's average over all sequences (e.g. for genes that do NOT reject the One-ratio model, everybody gets the same omega)
+tmp <- data.frame(OG=c(One_ratio$OG, Two_ratio$OG))
+tmp$Background <- c(One_ratio$W0_ML, Two_ratio$W0_ML)
+tmp$Foreground <- c(One_ratio$W0_ML, Two_ratio$W1_ML)
+tmp$WE <- tmp$Foreground
+tmp$TAG <- tmp$Foreground
+tmp[tmp$OG %in% Three_ratio$OG,]$Background <- Three_ratio$W0_ML
+tmp[tmp$OG %in% Three_ratio$OG,]$WE <- Three_ratio$W1_ML
+tmp[tmp$OG %in% Three_ratio$OG,]$TAG <- Three_ratio$W2_ML
+
+write.csv(tmp, file="codeml_ForeBack_N0.csv", quote=F, row.names = F)
+
+##and repeat for N1
+codeml <- data.table( read.csv("F:/Antarctic_copepods/starve/codeml_N1.csv") )
+
+conv <- codeml[abs(W_Null2 - W_Null05) <= 0.01 & abs(W0_ML2 - W0_ML05) <= 0.01 & abs(W1_ML2 - W1_ML05) <= 0.01, ]
+
+conv$lnL_NULL <- apply(conv[,c(2,3)], 1, FUN=max)
+conv$lnL_ML <- apply(conv[,c(4,5)], 1, FUN=max)
+conv$W_Null <- 0
+conv$W0_ML <- 0
+conv$W1_ML <- 0
+
+#obtain values from the model run with the best likelihood btwn. the 2 starting values
+conv$test <- apply(conv[,c(2,3)],1, FUN=which.max)
+conv[test==1,]$W_Null <- conv[test==1,]$W_Null2
+conv[test==2,]$W_Null <- conv[test==2,]$W_Null05
+conv$test <- apply(conv[,c(4,5)],1, FUN=which.max)
+conv[test==1,]$W0_ML <- conv[test==1,]$W0_ML2
+conv[test==1,]$W1_ML <- conv[test==1,]$W1_ML2
+conv[test==2,]$W0_ML <- conv[test==2,]$W0_ML05
+conv[test==2,]$W1_ML <- conv[test==2,]$W1_ML05
+
+conv <- conv[,-c(2:5,7:12,18)]
+
+#perform likelihood ratio test
+conv$LRT <- -2*(conv$lnL_NULL - conv$lnL_ML)
+conv$LRT[conv$LRT < 0] = 0
+conv$p = pchisq(conv$LRT, df=1, lower.tail=FALSE)
+conv$padj = p.adjust(conv$p, method="BH")
+
+codeml$N1 <- codeml$OG
+codeml$OG <- OG_key[match(codeml$N1, OG_key$N1),]$N20
+
+Two_ratio <- conv[padj < 0.01,]
+One_ratio <- conv[padj >= 0.01,]
+
+Two_ratio$LRT_fix <- -2*(Two_ratio$lnL_Fix - Two_ratio$lnL_ML)
+Two_ratio$p_Fix = pchisq(Two_ratio$LRT_fix, df=1, lower.tail=FALSE)
+Two_ratio$padj_Fix = p.adjust(Two_ratio$p_Fix, method="BH")
+
+neutral <- Two_ratio[padj_Fix >= 0.01,]
+
+omega <- Two_ratio[padj_Fix < 0.01,] %>% dplyr::select(OG, W_Null, W0_ML, W1_ML, p, padj)
+
+omega$Diff <- omega$W1_ML - omega$W0_ML
+length(which(omega$Diff < 0))
+#6669 / 6852 (p0.01)
+
+#ratio of change in dN/dS
+omega$Ratio <- omega$Diff / omega$W0_ML
+
+ggplot(omega, aes(x=Ratio)) + stat_halfeye() + theme_bw()
+
+positive <- omega[Diff>0]
+negative <- omega[Diff<0]
+
+median(negative$Ratio)
+#median reduction of 34%
+median(positive$Ratio)
+#median increase of 34%
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N1_Omega_points.png")
+ggplot(omega, aes(x=W0_ML, y=W1_ML)) + geom_point(alpha=0.5) + theme_bw() + 
+  geom_hline(yintercept = 1) + geom_vline(xintercept = 1) + geom_abline(slope = 1, intercept = 0) 
+dev.off()
+
+#color scheme for background, Foreground, TAG and WE...
+colors <- c("darkgrey", "#381A61FF", "#88A0DCFF", "#7C4B73FF")
+
+to_plot = melt(omega[,c(3,4)])
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N1_Omega_Dist.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, color="black") + theme_bw()
+p + geom_vline(xintercept = median(omega$W0_ML), color="black") + geom_vline(xintercept = median(omega$W1_ML), color=colors[2]) + 
+  scale_fill_manual(values=colors)
+dev.off()
+
+##TAG (separate omega for TAG/WE species)
+TAG <- read.table("codeml_output_TAG_N1.txt", fill=T)
+names(TAG) = c("OG","lnL_ML2", "lnL_ML05", "lnL_Fix", "W0_ML2", "W1_ML2", "W2_ML2", "W0_ML05", "W1_ML05", "W2_ML05")
+TAG <- data.table(TAG)
+
+TAG <- TAG[OG %in% Two_ratio$OG]
+conv <- TAG[abs(W0_ML2 - W0_ML05) <= 0.01 & abs(W1_ML2 - W1_ML05) <= 0.01 & abs(W2_ML2 - W2_ML05) <= 0.01, ]
+
+conv$lnL_ML <- apply(conv[,c(2,3)], 1, FUN=max)
+conv$W0_ML <- 0
+conv$W1_ML <- 0
+conv$W2_ML <- 0
+
+#obtain values from the model run with the best likelihood btwn. the 2 starting values
+conv$test <- apply(conv[,c(2,3)],1, FUN=which.max)
+conv[test==1,]$W0_ML <- conv[test==1,]$W0_ML2
+conv[test==1,]$W1_ML <- conv[test==1,]$W1_ML2
+conv[test==1,]$W2_ML <- conv[test==1,]$W2_ML2
+conv[test==2,]$W0_ML <- conv[test==2,]$W0_ML05
+conv[test==2,]$W1_ML <- conv[test==2,]$W1_ML05
+conv[test==2,]$W2_ML <- conv[test==2,]$W2_ML2
+
+conv <- conv[,-c(2:3,5:10,15)]
+conv$lnL_2ratio <- Two_ratio[match(conv$OG, Two_ratio$OG), ]$lnL_ML
+
+conv$LRT <- -2*(conv$lnL_2ratio - conv$lnL_ML)
+conv$LRT[conv$LRT < 0] = 0
+conv$p = pchisq(conv$LRT, df=1, lower.tail=FALSE)
+conv$padj = p.adjust(conv$p, method="BH")
+
+Three_ratio <- conv[padj < 0.01,]
+
+Three_ratio$LRT_fix <- -2*(Three_ratio$lnL_Fix - Three_ratio$lnL_ML)
+Three_ratio$p_Fix = pchisq(Three_ratio$LRT_fix, df=1, lower.tail=FALSE)
+Three_ratio$padj_Fix = p.adjust(Three_ratio$p_Fix, method="BH")
+
+neutral <- Three_ratio[padj_Fix >= 0.01,]
+
+omega <- Three_ratio[padj_Fix < 0.01,] %>% dplyr::select(OG, W0_ML, W1_ML, W2_ML, p, padj)
+
+omega$Diff <- omega$W2_ML - omega$W1_ML
+length(which(omega$Diff > 0))
+
+omega$Ratio <- omega$Diff / omega$W1_ML
+
+positive <- omega[Diff>0]
+negative <- omega[Diff<0]
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_3ratio_points.png")
+ggplot(omega, aes(x=W1_ML, y=W2_ML)) + geom_point() + theme_bw() + geom_hline(yintercept = 1) + geom_vline(xintercept = 1) + geom_abline(slope = 1, intercept = 0)
+dev.off()
+
+to_plot = melt(omega[,c(2,3,4)])
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_3ratio_Dist.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, colour="black") + theme_bw()
+p + geom_vline(xintercept = median(omega$W0_ML)) + geom_vline(xintercept = median(omega$W1_ML), color=colors[3]) + 
+  geom_vline(xintercept = median(omega$W2_ML), color=colors[4]) + scale_fill_manual(values=colors[c(1,3,4)])
+dev.off()
+
+### For the next sections, let's average over all sequences (e.g. for genes that do NOT reject the One-ratio model, everybody gets the same omega)
+tmp <- data.frame(OG=c(One_ratio$OG, Two_ratio$OG))
+tmp$Background <- c(One_ratio$W0_ML, Two_ratio$W0_ML)
+tmp$Foreground <- c(One_ratio$W0_ML, Two_ratio$W1_ML)
+tmp$WE <- tmp$Foreground
+tmp$TAG <- tmp$Foreground
+tmp[tmp$OG %in% Three_ratio$OG,]$Background <- Three_ratio$W0_ML
+tmp[tmp$OG %in% Three_ratio$OG,]$WE <- Three_ratio$W1_ML
+tmp[tmp$OG %in% Three_ratio$OG,]$TAG <- Three_ratio$W2_ML
+
+write.csv(tmp, file="codeml_ForeBack_N1.csv", quote=F, row.names = F)
+
+
+```
+
+
+These two chunks have the averaged omega estimates from above, so we can compare between the different lineages bast on the best-fit model
+```{r}
+codeml <- read.csv("codeml_ForeBack_N0.csv") 
+OG_key <- read.table("OG_cheatsheet.txt", header=T)
 codeml$N0 <- codeml$OG
 codeml$OG <- OG_key[match(codeml$N0, OG_key$N0),]$N20
 
@@ -972,67 +1200,94 @@ omega <- data.table(omega)
 omega$Foreground <- omega$WE
 omega[Species=="Prop"]$Foreground <- omega[Species=="Prop"]$TAG
 
-#We know that starvation-response genes are under stronger selection. Does this differ between Foreground and Background?
-#tmp <- omega %>% dplyr::select(Gene, Species, AveExpr, Group, Background, Foreground) %>% pivot_longer(cols = c("Background", "Foreground"), names_to = "lineage")
-
-tmp <- omega %>% filter(!is.na(N0)) %>% dplyr::select(N0, Species, AveExpr, Group, Background, WE, TAG) %>% pivot_longer(cols = c("Background", "WE", "TAG"), names_to = "lineage") %>% filter( (Species=="Acutus" & lineage=="WE") | (Species=="Prop" & lineage=="TAG")                                                                                                                                )
-  
-res <- glm(value ~ Group * lineage, data=tmp, family=Gamma(link='log'))
-summary(res)
-plot(res)
-visreg(res, xvar="lineage", by="Group", data=tmp, method="REML")
-
-#so it looks like all types of genes are under stronger selection in the Foreground... consistent with the general pattern we observe across the transcriptome. But are the SLOPES different? 
-emmip(res, Group ~ lineage)
-contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
-#the slopes are all different. In other words, the differences between starvation-response genes and other genes are LARGER in the Foreground (and between Cons and DE)
-
-#However, we haven't included AveExpr yet. This is not unreasonable, since the data are already averaging over many sequences and we are only making comparisons between Foreground vs. Background (in other words, we make the assumption that mean expression is unchanged between Foreground and Background). But maybe including AveExpr (only measured in two species in the Foreground, of course) would give more meaningful differences between Groups
-
-res <- glm(value ~ AveExpr + Group*lineage, data=tmp, family=Gamma(link='log'))
-summary(res)
-plot(res)
-visreg(res, xvar="lineage", by="Group", data=tmp, method="REML")
-
-#so now it's a little different, in that there is no difference between Groups IN THE BACKGROUND
-emmip(res, Group ~ lineage)
-contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
-#Slopes are all still different.
-#Is this real? I don't know
-
-
-ggplot(omega, aes(y=log(Foreground), x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "loess", color = "red", degree=1, se=FALSE) + theme_bw() + facet_grid(.~Species) #obviously genes with higher expression have low omega
-
-dunnTest(log(Foreground) ~ Group, data=omega[Species=="Acutus"]); omega %>% 
-  group_by(Group, Species) %>% dplyr::summarize(median(log(Foreground), na.rm=T))
-dunnTest(log(Foreground) ~ Group, data=omega[Species=="Prop"])
-
-
-lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Acutus",], na.action = na.omit, weights = 1/SE**2)
-summary(lfc) #positive, p=0.09
-lfc = lm(W_regressed ~ abs(logFC), data = omega[Species=="Prop",], na.action = na.omit, weights = 1/SE**2)
-summary(lfc)#positive, p=0.0007
-#genes with high omega tend to have larger LFC (and probably also more variable expression in general...)
-
 ###
+#color scheme for background, Foreground, TAG and WE...
+colors <- c("darkgrey", "#381A61FF", "#A9D18E", "#88A0DCFF")
 
-omega <- join(omega, All_diff, by="OG", type="left")
+to_plot = unique( melt(codeml[,c("N0", "Background", "Foreground")]) )
 
-ggplot(omega, aes(x=log(Foreground), y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
-ggplot(omega, aes(x=W_regressed, y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
-cor.test(log(omega$Foreground), abs(omega$Difference), method="spearman")
-cor.test(omega$W_regressed, abs(omega$Difference), method="spearman")
+Back_med <- median(to_plot[to_plot$variable=="Background",]$value) #0.251
+Fore_med <- median(to_plot[to_plot$variable=="Foreground",]$value) #0.172
+  
+png(res=400, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_Dist_Averaged.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, color="black") + theme_bw()
+p + geom_vline(xintercept = Back_med, color="black") + geom_vline(xintercept = Fore_med, color=colors[2]) + 
+  scale_fill_manual(values=colors)
+dev.off()
 
-cor.test(log(omega$Foreground), abs(omega$Dispersion), method="spearman")
-cor.test(omega$W_regressed, abs(omega$Dispersion), method="spearman")
+to_plot = unique( melt(omega[!is.na(N0),c("N0", "Background", "WE", "TAG")]) )
+
+WE_med <- median(to_plot[to_plot$variable=="WE",]$value) #0.165
+TAG_med <- median(to_plot[to_plot$variable=="TAG",]$value) #0.179
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N0_Omega_Dist_3ratio_Averaged_green.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, colour="black") + theme_bw()
+p <- p + geom_vline(xintercept = Back_med, size=1.2) + geom_vline(xintercept = WE_med, color="#62983E", size=1.2) + 
+  geom_vline(xintercept = TAG_med, color=colors[4], size=1.2) 
+p + scale_fill_manual(values=colors[c(1,3,4)], labels=c("Background", "WE taxa", "TAG taxa")) + xlab("dN/dS") + ylab("Density") + theme(text = element_text(size = 20), legend.title=element_blank())
+dev.off()
+
+wilcox.test(to_plot[to_plot$variable=="TAG",]$value, to_plot[to_plot$variable=="WE",]$value)
+#2e-16, sig.
+
+#########
+#Look at Starvation-response genes among Two-ratio genes
+###########
+#We'll consider a gene family "DE" if it contains at least one species-specific starvation genes (and no Cons)
+#and "Cons" if it contains at least one Cons genes
+DE <- omega[DE=="DE"]
+cons <- omega[Starve_conserved=="Yes"]
+
+codeml <- data.table(codeml)
+codeml$Group <- "non-DE"
+codeml[N0 %in% DE$N0]$Group <- "DE"
+codeml[N0 %in% cons$N0]$Group <- "Cons"
+table(codeml$Group)
+codeml$Group <- factor(codeml$Group, levels=c("non-DE", "DE", "Cons"))
+
+codeml %>% group_by(Group) %>% summarize(median(Background), median(Foreground), median(WE),median(TAG))
+
+tmp <- unique( codeml %>% pivot_longer(cols = c("Background", "Foreground"), names_to = "lineage") )
+res = glm(data=tmp, value ~ Group*lineage, family=Gamma(link='log'))
+summary(res)
+plot(res)
+visreg(res, xvar="Group", by="lineage", data=tmp, method="REML")
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/EMM_slopes_N0.png")
+emmip(res, Group ~ lineage, type="response", CIs=TRUE, dotarg=list(shape = "circle", size=2, color="black"),
+      linearg=list(linetype = "solid", size=2)) + theme_bw() + scale_color_manual(values=cols[c(4,3,1)])
+dev.off()
+
+contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
+#the "Cons" contrasts differ between lineages... So basically Cons genes are under RELATIVELY stronger expression in Foreground 
+#than both DE and non-DE genes
+
+tmp <- unique( codeml %>% pivot_longer(cols = c("Background", "WE", "TAG"), names_to = "lineage") )
+res = glm(data=tmp, value ~ Group*lineage, family=Gamma(link='log'))
+summary(res)
+plot(res)
+visreg(res, xvar="Group", by="lineage", data=tmp, method="REML")
+
+png(res=400, width=5, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/EMM_slopes_N0_TAG2.png")
+emmip(res, Group ~ lineage, type="response", CIs=TRUE, dotarg=list(shape = "circle", size=2, color="black"),
+      linearg=list(linetype = "solid", size=2))+ theme_bw() + 
+  scale_color_manual(values=cols[c(4,3,1)], labels=c("non-DE", "species-specific \nDE", "CSGs")) + xlab("Branches") + 
+  ylab("dN/dS") + scale_y_continuous(trans="log") + theme(text = element_text(size=16), legend.title=element_blank()) +
+  scale_x_discrete(guide = guide_axis(angle = 0))
+dev.off()
+
+labels=c(exp(1)**-1.3, exp(1)**-1.5, exp(1)**-1.7, exp(1)**-1.9, exp(1)**-2.1)
+
+contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
+#Interpretation: selection has intensified in Cons genes in both TAG and WE lineages, but moreso in WE (p<0.05)
+
 
 
 ```
 
-#Check with N1
 ```{r}
-codeml <- read.csv("Codeml_All_N1.csv")
-OG_key <- read.table("F:/Antarctic_copepods/starve/OG_cheatsheet.txt", header=T)
+codeml <- read.csv("codeml_ForeBack_N1.csv") 
+OG_key <- read.table("OG_cheatsheet.txt", header=T)
 codeml$N1 <- codeml$OG
 codeml$OG <- OG_key[match(codeml$N1, OG_key$N1),]$N20
 
@@ -1042,55 +1297,94 @@ omega <- data.table(omega)
 omega$Foreground <- omega$WE
 omega[Species=="Prop"]$Foreground <- omega[Species=="Prop"]$TAG
 
-ggplot(omega, aes(y=log(Foreground), x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "loess", color = "red", degree=1, se=FALSE) + theme_bw() + facet_grid(.~Species) #obviously genes with higher expression have low omega
-
-omega$Group <- omega$DE
-omega[Gene %in% df[Starve_conserved=="Yes"]$Gene]$Group <- "Cons"
-
-dunnTest(log(Foreground) ~ Group, data=omega[Species=="Acutus"]); omega %>% 
-  group_by(Group, Species) %>% dplyr::summarize(median(log(Foreground), na.rm=T))
-dunnTest(log(Foreground) ~ Group, data=omega[Species=="Prop"])
-
-loess_Acutus = loess(log(Foreground) ~ AveExpr, data = omega[Species=="Acutus",], degree=1, na.action = na.omit)
-loess_Prop = loess(log(Foreground) ~ AveExpr, data = omega[Species=="Prop",], degree=1, na.action = na.omit)
-
-omega$W_regressed <- omega$Foreground
-names(loess_Acutus$residuals) = omega[Species=="Acutus" & (!is.na(Foreground)) & (!is.na(AveExpr)),]$Gene
-omega[Species=="Acutus",]$W_regressed =  loess_Acutus$residuals[omega[Species=="Acutus",]$Gene]
-names(loess_Prop$residuals) = omega[Species=="Prop" & (!is.na(Foreground)) & (!is.na(AveExpr)),]$Gene
-omega[Species=="Prop",]$W_regressed = loess_Prop$residuals[omega[Species=="Prop",]$Gene]
-
-#sanity check
-ggplot(omega, aes(y=W_regressed, x=AveExpr)) + geom_point(alpha=0.5) + geom_smooth(method = "lm", color = "red") + theme_bw() + facet_grid(.~Species)
-
-
-ggplot(omega, aes(x=Group, y=log(Foreground), fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species)
-
-ggplot(omega, aes(x=Group, y=W_regressed, fill = Group)) + geom_violin() + geom_boxplot(width=0.2, fill="white") + theme_bw() + facet_grid(.~Species) 
-
 ###
 
-omega <- join(omega, All_diff, by="OG", type="left")
+to_plot = unique( melt(codeml[,c("N1", "Background", "Foreground")]) )
 
-ggplot(omega, aes(x=log(Foreground), y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
-ggplot(omega, aes(x=W_regressed, y=abs(Difference))) + geom_point() + theme_bw() + facet_grid(.~Species)
-cor.test(log(omega$Foreground), abs(omega$Difference), method="spearman")
-cor.test(omega$W_regressed, abs(omega$Difference), method="spearman")
+Back_med <- median(to_plot[to_plot$variable=="Background",]$value) #0.240
+Fore_med <- median(to_plot[to_plot$variable=="Foreground",]$value) #0.187
+  
+png(res=400, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N1_Omega_Dist_Averaged.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, color="black") + theme_bw()
+p + geom_vline(xintercept = Back_med, color="black") + geom_vline(xintercept = Fore_med, color=colors[2]) + 
+  scale_fill_manual(values=colors)
+dev.off()
 
-cor.test(log(omega$Foreground), abs(omega$Dispersion), method="spearman")
-cor.test(omega$W_regressed, abs(omega$Dispersion), method="spearman")
+to_plot = unique( melt(omega[!is.na(N1),c("N1", "Background", "WE", "TAG")]) )
 
+WE_med <- median(to_plot[to_plot$variable=="WE",]$value) #0.181
+TAG_med <- median(to_plot[to_plot$variable=="TAG",]$value) #0.192
+
+png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/N1_Omega_Dist_3ratio_Averaged_green.png")
+p <- ggplot(to_plot, aes(x=value, fill=variable)) + geom_density(alpha=0.5, colour="black") + theme_bw()
+p <- p + geom_vline(xintercept = Back_med, size=1.2) + geom_vline(xintercept = WE_med, color="#62983E", size=1.2) + 
+  geom_vline(xintercept = TAG_med, color=colors[4], size=1.2) 
+p + scale_fill_manual(values=colors[c(1,3,4)], labels=c("Background", "WE taxa", "TAG taxa")) + xlab("dN/dS") + ylab("Density") + theme(text = element_text(size = 20), legend.title=element_blank())
+dev.off()
+
+
+#########
+#Look at Starvation-response genes among Two-ratio genes
+###########
+#We'll consider a gene family "DE" if it contains at least one species-specific starvation genes (and no Cons)
+#and "Cons" if it contains at least one Cons genes
+DE <- omega[DE=="DE"]
+cons <- omega[Starve_conserved=="Yes"]
+
+codeml <- data.table(codeml)
+codeml$Group <- "non-DE"
+codeml[N1 %in% DE$N1]$Group <- "DE"
+codeml[N1 %in% cons$N1]$Group <- "Cons"
+table(codeml$Group)
+codeml$Group <- factor(codeml$Group, levels=c("non-DE", "DE", "Cons"))
+
+codeml %>% group_by(Group) %>% summarize(median(Background), median(Foreground), median(WE),median(TAG))
+
+tmp <- unique( codeml %>% pivot_longer(cols = c("Background", "Foreground"), names_to = "lineage") )
+res = glm(data=tmp, value ~ Group*lineage, family=Gamma(link='log'))
+summary(res)
+plot(res)
+visreg(res, xvar="Group", by="lineage", data=tmp, method="REML")
+
+png(res=300, width=4, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/EMM_slopes_N1.png")
+emmip(res, Group ~ lineage, type="response", CIs=TRUE, dotarg=list(shape = "circle", size=2, color="black"),
+      linearg=list(linetype = "solid", size=2)) + theme_bw() + scale_color_manual(values=cols[c(4,3,1)])
+dev.off()
+
+contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
+#the "Cons" contrasts differ between lineages... So basically Cons genes are under RELATIVELY stronger expression in Foreground 
+#than both DE and non-DE genes
+
+tmp <- unique( codeml %>% pivot_longer(cols = c("Background", "WE", "TAG"), names_to = "lineage") )
+res = glm(data=tmp, value ~ Group*lineage, family=Gamma(link='log'))
+summary(res)
+plot(res)
+visreg(res, xvar="Group", by="lineage", data=tmp, method="REML")
+
+png(res=400, width=5, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/EMM_slopes_N1_TAG2.png")
+emmip(res, Group ~ lineage, type="response", CIs=TRUE, dotarg=list(shape = "circle", size=2, color="black"),
+      linearg=list(linetype = "solid", size=2))+ theme_bw() + 
+  scale_color_manual(values=cols[c(4,3,1)], labels=c("non-DE", "species-specific \nDE", "CSGs")) + xlab("Branches") + 
+  ylab("dN/dS") + scale_y_continuous(trans="log") + theme(text = element_text(size=16), legend.title=element_blank()) +
+  scale_x_discrete(guide = guide_axis(angle = 0))
+dev.off()
+
+labels=c(exp(1)**-1.3, exp(1)**-1.5, exp(1)**-1.7, exp(1)**-1.9, exp(1)**-2.1)
+
+contrast(emmeans(res, ~Group*lineage), interaction = "pairwise")
+#Here there is no difference in slopes between TAG and WE
 
 ```
 
+
 Fair et al 2020 suggest that highly conserved "essential" genes would have low Dispersion (less variable across individuals). In support, they found that genes with lower dN/dS (coding region conservation) have lower Dispersion in general.
 
-So, do we see the same pattern in our data? 
+So, do we see the same pattern in our data?  
 
-branch-level dN/dS estimates
+branch-level dN/dS estimates - Fig. 5C-D in the paper.
 ```{r}
-N0 <- read.csv("F:/Antarctic_copepods/tmp/N0_codeml_MG94.csv")
-N1 <- read.csv("F:/Antarctic_copepods/tmp/N1_codeml_MG94.csv")
+N0 <- read.csv("N0_codeml_MG94.csv")
+N1 <- read.csv("N1_codeml_MG94.csv")
 #since we're going to be dealing with Omega on a log scale, let's also get an SE for the log values (NOT the same as the logged standard SE)
 N0$logSE <- (log10(N0$UB) - log10(N0$LB)) / 3.92
 N1$logSE <- (log10(N1$UB) - log10(N1$LB)) / 3.92
@@ -1116,6 +1410,7 @@ p
 p + scale_x_log10() + scale_y_log10()
 
 #so it's a nice sanity check that these estimates are highly correlated. N0 estimates include more data, but N1 (younger) might be more accurate in terms of orthology inference. Anyway...
+omega_df$logFC <- as.numeric(omega_df$logFC)
 
 cor.test(omega_df$W_N0, abs(omega_df$logFC), use='pairwise.complete.obs', method="spearman") #(rho=0.17)
 cor.test(omega_df$W_N1, abs(omega_df$logFC), use='pairwise.complete.obs', method="spearman") #(rho=0.18)
@@ -1155,6 +1450,8 @@ cor(omega_df$W_N1, omega_df$Dispersion, use='pairwise.complete.obs', method="spe
 
 #Anyway, what we really care about is whether Starvation response genes differ in their dN/dS from other genes. In order to address this, we should account for the influence of expression level on dN/dS. If we don't account for expression, it is probably true, but this doesn't tell us anything other than that starvation-response genes are highly expressed
 
+omega_df$Group <- factor(omega_df$Group, levels=c("Non-DE", "DE", "Cons"))
+
 png(res=300, width=6, height=4, units='in', file="F:/Antarctic_copepods/starve/figs/OmegaN0.png")
 ggplot(omega_df, aes(y=W_N0, x=Group, fill=Group)) + stat_eye() + theme_bw() + facet_grid(.~Species) + scale_fill_manual(values=cols[c(4,3,1)], labels=c("non-DE", "Species-specific DE", "CSG") ) + scale_y_log10(limits=c(1e-3, 3)) + theme(text=element_text(size=18), strip.background = element_blank(), strip.text = element_blank(), legend.position = "none") +
   labs(y="dN/dS") + scale_x_discrete(labels=c("non-DE", "DE", "CSG"))
@@ -1172,7 +1469,7 @@ dunnTest(W_N1 ~ Group, data=omega_df[Species=="Acutus"]); omega_df %>%
 dunnTest(W_N1 ~ Group, data=omega_df[Species=="Prop"])
 
 #indeed
-#One way to account for Expression would be a GLM (rather than, say, first regression Omega against Expr and then testing for differences in the residuals). And the nice thing is, we can propagate uncertainty in our Omega estimates via the (log)SE
+#One way to account for Expression would be a GLM (rather than, say, first regressing Omega against Expr and then testing for differences in the residuals). And the nice thing is, we can propagate uncertainty in our Omega estimates via the (log)SE
 
 library(visreg)
 library(emmeans)
@@ -1190,32 +1487,33 @@ visreg(res, xvar="TPM", by="Group", data=omega_df[Species=="Acutus"], method="RE
 # Does Cons also differ from DE?
 test <- emmeans(res, "Group")
 pairs(test) #yep, p=0.006
-exp(1)**summary(test)$emmean #this is the groupwise Omega estimates... so 0.22 for non-DE, 0.19 for DE, and 0.17 for Cons. 
+exp(1)**summary(test)$emmean #this is the groupwise Omega estimates... so 0.23 for non-DE, 0.19 for DE, and 0.15 for Cons. 
 
 res = glm(W_N1 ~ TPM + Group, data=omega_df[Species=="Acutus"], weights=1/logSE_N1**2, family=Gamma(link='log'))
 summary(res)
 termplot(res, partial.resid = T, smooth=panel.smooth)
-visreg(res, xvar="AveExpr", by="Group", data=omega_df[Species=="Acutus"], method="REML")
+visreg(res, xvar="TPM", by="Group", data=omega_df[Species=="Acutus"], method="REML")
 test <- emmeans(res, "Group")
-pairs(test) 
+pairs(test) #p=0.014
 
 #What about propinquus?
 
 res = glm(W_N0 ~ TPM + Group, data=omega_df[Species=="Prop"], weights=1/logSE_N0**2, family=Gamma(link='log'))
 summary(res)
 termplot(res, partial.resid = T, smooth=panel.smooth)
-visreg(res, xvar="AveExpr", by="Group", data=omega_df[Species=="Prop"], method="REML")
+visreg(res, xvar="TPM", by="Group", data=omega_df[Species=="Prop"], method="REML")
 test <- emmeans(res, "Group")
 pairs(test) #Here, no difference between DE and Cons
+exp(1)**summary(test)$emmean #groupwise omega estimates
 
 res = glm(W_N1 ~ TPM + Group, data=omega_df[Species=="Prop"], weights=1/logSE_N1**2, family=Gamma(link='log'))
 summary(res)
 termplot(res, partial.resid = T, smooth=panel.smooth)
-visreg(res, xvar="AveExpr", by="Group", data=omega_df[Species=="Prop"], method="REML")
+visreg(res, xvar="TPM", by="Group", data=omega_df[Species=="Prop"], method="REML")
 test <- emmeans(res, "Group")
 pairs(test) #Same here.
 
-#So, in aggregate, dN/dS in Cons genes is always lower than species-specific DE genes, but it's not significant. Of course this is affected by sample size, there are relatively few Cons genes. Regardless, we conclude that starvation-response genes are under stronger purifying selection than expected based on their expression level, but Cons genes are not necessarily under stronger selection in terms of their protein coding sequence
+#So, in aggregate, dN/dS in CSGs genes is always lower than species-specific DE genes, but it's not significant. Of course this is affected by sample size, there are relatively few Cons genes. Regardless, we conclude that starvation-response genes are under stronger purifying selection than expected based on their expression level, but Cons genes are not necessarily under stronger selection in terms of their protein coding sequence
 
 
 ```
