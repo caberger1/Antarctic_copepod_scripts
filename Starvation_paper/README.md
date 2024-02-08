@@ -1,5 +1,5 @@
 
-This folder contains data and code for "Comparative analysis of the molecular starvation response of Southern Ocean copepods" by Berger et al. (2023) (https://doi.org/10.1101/2023.08.17.553703). There are sub-folders for differential expression/WGCNA analyses, comparative analyses (including selection/phylogenetic analyses), and physiology (lipids and enzyme activity). 
+This folder contains data and code for "Comparative analysis of the molecular starvation response of Southern Ocean copepods" by Berger et al. (2023) (https://doi.org/10.1101/2023.08.17.553703). There are sub-folders for differential expression/WGCNA analyses, comparative analyses (including selection/phylogenetic analyses), and physiology (lipids, enzyme activity, and reproduction/food in gut). 
 
 The main intermediate results file is “df_060322_Annotated.csv”. This file contains detailed information for each gene in both species with results from the starvation experiments, including expression data, Orthogroup assignments, and BLAST annotations. “df_Ship_060322_Annotated.csv” contains the same information, except with fold-change/expression data from the Field vs. ship comparison. These files are used as input for “Comparative_Analyses.Rmd”, which contains the bulk of the comparative analyses presented in the paper. 
 
