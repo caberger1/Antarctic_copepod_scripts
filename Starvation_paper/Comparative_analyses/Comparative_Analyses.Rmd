@@ -4,9 +4,7 @@ author: "Cory Berger"
 output: html_notebook
 ---
 
-This notebook contains code for comparative analyses of the starvation response in *Calanoides acutus* and *Calanus propinquus*. Code to generate some of the input files is found separately in the github repo
-
-You can simply change the 
+This notebook contains code for comparative analyses of the starvation response in *Calanoides acutus* and *Calanus propinquus*. Code to generate some of the input files is found separately in the github repo.
 
 #########~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~PART 1
 ######## load in data, including Orthology assignments and DE results 
