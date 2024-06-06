@@ -1,0 +1,149 @@
+Let's do DAPC!
+```{r} 
+#first, Acutus
+library(adegenet)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
+
+cpms <- read.table("Acutus_limma_CPM.txt")
+
+group_table <- read.table("../../Differential_expression_WGCNA/group_table.txt", header=TRUE)
+group_table$food <- c(rep(NA, 15), rep("fed", 4), rep("starved", 4), rep(NA, 15), rep("fed", 4), rep("refed", 4), rep("starved", 4))
+group_table$site <- c(rep(117, 5), rep(27, 5), rep(45, 5), rep(NA, 8), rep(62, 5), rep(77,5), rep(81, 5), rep(NA, 12))
+group_table$food <- factor(group_table$food, levels=c("fed", "refed", "starved"))
+group_table$site <- factor(group_table$site, levels=c("45" ,"27"  ,"62"  ,"77" ,"81" , "117"))
+group_table <- group_table[-40,]
+
+fed_dat <- cpms[,c(16:23,39:41,46:49)]
+field_dat <- cpms[,c(1:15,24:38)]
+
+#without Refed
+dp <- dapc(t(fed_dat), group_table[!is.na(group_table$food),]$food[-c(12:15)], n.da=1, perc.pca=80)
+
+assemble_dp_coords = function(dp.object){
+  res = tibble(Run = rownames(dp.object$ind.coord),
+               LD1 = dp.object$ind.coord[,'LD1'],
+               group = as.character(dp.object$grp))
+}
+
+coords <- assemble_dp_coords(dp)
+coords %>% 
+  ggplot(aes(x=LD1,fill=group)) +
+  geom_density(alpha=0.8) + theme_bw() + xlim(c(-10, 10)) + geom_point( aes(y = 0))
+
+assemble_pred_coords = function(pred.object, group.vector){
+  res = tibble(Run = rownames(pred.object$ind.scores),
+               LD1 = pred.object$ind.scores[,'LD1'],
+               group = group.vector)
+}
+
+pred_field <- predict.dapc(dp, newdata = (t(field_dat)))
+Field_coords <- assemble_pred_coords(pred_field, group_table[!is.na(group_table$site),]$site)
+
+df <- rbind(coords, Field_coords)
+
+brewer.pal(6,"Greens")
+starve_cols <- c("#E76254FF", "#EF8A47FF", "#AADCE0FF", "#72BCD5FF", "#376795FF")
+site_cols <- c("#5d5d5d", "#4477AA", "#66CCEE", "#CCBB44", "#AA3377", "#228833")
+
+#field from low to high chl
+df$group <- factor(df$group, levels=c("fed", "starved", "81", "77", "27", "45", "117", "62"), labels=
+                     c("Fed", "Starved", "-100.000", "000.100", "400.040", "200.040", "616.040", "200.000"))
+df$Chl <- c( rep("Expt", 15), rep("High-chl", 5), rep("Low-chl", 5), rep("High-chl", 10), rep("Low-chl", 10) )
+df$Chl <- factor(df$Chl, levels=c("High-chl", "Low-chl", "Expt"))
+
+png(res=400, units='in', height=4, width=6, file="Acutus_Chl_DAPC_082923.png")
+p <- df %>% 
+  ggplot(aes(x=LD1,fill=group)) +
+  geom_density(alpha=0.7) +
+  scale_fill_manual(values=c(starve_cols[5], starve_cols[1], brewer.pal(6,"Greens")), name="Group/Site") +
+  theme_minimal() + xlim(c(-10, 10)) + geom_point( aes(y = 0, fill = group), colour="black", size=2.5, shape=21)
+
+p <- p + facet_grid(Chl~.) + ylab("Density") + xlab("LD1") + 
+  theme(text = element_text(size = 14), strip.background = element_blank(), legend.position="top")   
+   
+  p
+dev.off()
+
+
+png(res=400, units='in', height=4, width=6, file="Acutus_Chl_DAPC_side.png")
+p <- df %>% 
+  ggplot(aes(x=LD1,fill=group)) +
+  geom_density(alpha=0.7) +
+  scale_fill_manual(values=c(starve_cols[5], starve_cols[1], site_cols), name="Group/Site") +
+  theme_minimal() + xlim(c(-10, 10)) + geom_point( aes(y = 0, fill = group), colour="black", size=2.5, shape=21)
+
+p <- p + facet_grid(Chl~.) + ylab("Density") + xlab("LD1") + 
+  theme(text = element_text(size = 14), strip.background = element_blank(), legend.position="right")   
+   
+  p
+dev.off()
+
+```
+
+```{r} 
+#and Propinquus!
+
+cpms <- read.table("prop_limma_CPM.txt")
+
+treatments <- read.table("../../Differential_expression_WGCNA/prop_sample_table.txt", header=TRUE)
+treatments$site = factor(treatments$site)
+treatments$day = factor(treatments$day)
+treatments = treatments[-24,]
+
+fed_dat <- cpms[,c(17:31)]
+field_dat <- cpms[,c(1:16)]
+
+dp <- dapc(t(fed_dat), treatments[!is.na(treatments$food),]$food, n.da=1, perc.pca=80)
+
+assemble_dp_coords = function(dp.object){
+  res = tibble(Run = rownames(dp.object$ind.coord),
+               LD1 = dp.object$ind.coord[,'LD1'],
+               group = as.character(dp.object$grp))
+}
+
+coords <- assemble_dp_coords(dp)
+coords %>% 
+  ggplot(aes(x=LD1,fill=group)) +
+  geom_density(alpha=0.8) + theme_bw() + xlim(c(-10, 10)) + geom_point( aes(y = 0))
+
+assemble_pred_coords = function(pred.object, group.vector){
+  res = tibble(Run = rownames(pred.object$ind.scores),
+               LD1 = pred.object$ind.scores[,'LD1'],
+               group = group.vector)
+}
+
+pred_field <- predict.dapc(dp, newdata = (t(field_dat)))
+Field_coords <- assemble_pred_coords(pred_field, treatments[!is.na(treatments$site),]$site)
+
+df <- rbind(coords, Field_coords)
+
+site_cols <- c("#4477AA", "#228833", '#5d5d5d', "#EE6677")
+#field from low to high chl
+df$group <- factor(df$group, levels=c("fed", "starved", "S1", "S2", "S3", "S4"), labels=
+                     c("Fed", "Starved", "000.100", "200.000", "100.180", "-100.000"))
+df$Chl <- c( rep("Expt", 15), rep("Field", 16))
+df$Chl <- factor(df$Chl, levels=c("Field", "Expt"))
+
+
+
+png(res=400, units='in', height=4, width=6, file="Prop_Chl_DAPC_082923.png")
+
+p <- df %>% 
+  ggplot(aes(x=LD1,fill=group)) +
+  geom_density(alpha=0.7) +
+  scale_fill_manual(values=c(starve_cols[5], starve_cols[1], site_cols), name="Group/Site") +
+  theme_minimal() + xlim(c(-10, 10)) + geom_point( aes(y = 0, fill = group), colour="black", size=2.5, shape=21)
+
+p <- p + facet_grid(Chl~.) + ylab("Density") + xlab("LD1") + 
+  theme(text = element_text(size = 14), strip.background = element_blank(), legend.position="top")   
+   
+  p
+
+dev.off()
+###
+
+
+```
+
