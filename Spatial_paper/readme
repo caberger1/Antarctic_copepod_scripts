@@ -9,12 +9,10 @@ Note that some files have been compressed due to space limitations (zip) and nee
 "Transcriptome" contains
 1. The script (PCA_plots_Fig4.R) and data to make the PCA plot (Fig. 4).
 2. Scripts and files needed to identify differentially expressed genes between stations or station groups.
+3. Scripts to make Figures 10 and 11 (chlorophyll gene expression correlation and DAPC, respectively)
 
 "Physiology" contains the script and data to plot food in gut, reproductive stage and citrate synthase (Fig 5 of original submission). 
 
 "WGCNA" contains scripts and files necessary to test for associations of environmental measurements with WGCNA modules and to make associated heat maps:
 * Calanoides acutus (WGCNA_Acutus.R; Figure 6)
 * Calanus propinquus (WGCNA_Propinquus.R; Figure 8)
-
-The scripts needed to make Figure 10 and Figure 11 are within the Starvation_paper folder, in the 'Comparative_Analyses.Rmd' and 'Acutus_limma.R' scripts, respectively. 
-These scripts have been copied here for clarity (Fig_10.R and Fig_11.R in the Transcriptome/ folder).
